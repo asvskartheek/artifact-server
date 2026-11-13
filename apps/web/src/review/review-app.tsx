@@ -16,11 +16,10 @@ import {
   Cancel01Icon,
   Comment01Icon,
   Download04Icon,
-  Edit02Icon,
   ExternalLinkIcon,
   File01Icon,
   FilterIcon,
-  FullScreenIcon,
+  Presentation01Icon,
   GithubIcon,
   Home01Icon,
   KeyboardIcon,
@@ -65,9 +64,10 @@ import {ArtifactMark} from "./artifact-mark.tsx";
 import {
   useReviewComments,
   ReviewCommentsInspector,
+  ThreadPopover,
   type ReviewCommentsInspectorHandle,
 } from "./review-comments.tsx";
-import { ReviewPreview } from "./review-preview.tsx";
+import { ReviewPreview, type AgentCursor } from "./review-preview.tsx";
 import {ReviewProjectPicker} from "./review-project-picker.tsx";
 import {isSettingsPath} from "./review-routes.ts";
 import {ReviewSettings} from "./review-settings.tsx";
@@ -565,7 +565,10 @@ function ArtifactReview({
   const [focusControlsCollapsed, setFocusControlsCollapsed] = useState(false);
   const [focusControlsHoverArmed, setFocusControlsHoverArmed] = useState(true);
   const [focusControlsInstant, setFocusControlsInstant] = useState(false);
-  const [htmlAnnotateModeActive, setHtmlAnnotateModeActive] = useState(true);
+  // Studio: comment mode is off until C (or the Comment button) turns it on.
+  const [htmlAnnotateModeActive, setHtmlAnnotateModeActive] = useState(false);
+  const [popoverPoint, setPopoverPoint] = useState<{readonly x: number; readonly y: number} | null>(null);
+  const [popoverOpen, setPopoverOpen] = useState(false);
   const [homeOpen, setHomeOpen] = useState(false);
   const focusCommentsButtonRef = useRef<HTMLButtonElement>(null);
   const focusControlsRestoreRef = useRef<HTMLButtonElement>(null);
@@ -618,6 +621,15 @@ function ArtifactReview({
     projectId,
     versionId: selectedVersionId,
   });
+  // One cursor per thread an agent is working on, in that agent's colour.
+  const agentCursors = useMemo<readonly AgentCursor[]>(
+    () => [...comments.agentWorking].map(([id, name]) => ({
+      color: agentColor(name),
+      id,
+      name,
+    })),
+    [comments.agentWorking],
+  );
   useEffect(() => {
     if (details === null || details.artifact.tags.length === 0) return;
     setCatalogKnownTags((current) => [
@@ -1205,7 +1217,13 @@ function ArtifactReview({
         return;
       }
 
-      if (key === "f" && selectedVersionId !== null) {
+      if (key === "c" && !event.metaKey && !event.ctrlKey && !event.altKey) {
+        event.preventDefault();
+        setHtmlAnnotateModeActive((active) => !active);
+        return;
+      }
+
+      if ((key === "p" || key === "f") && selectedVersionId !== null) {
         event.preventDefault();
         if (focusMode) exitFocusMode();
         else enterFocusMode();
@@ -1410,6 +1428,43 @@ function ArtifactReview({
         </Dialog.Portal>
       </Dialog.Root>
 
+      {!focusMode && !catalogOpen ? (
+        <nav aria-label="Studio" className="as-rail">
+          <a
+            aria-label="Home"
+            className="as-rail__brand"
+            href="/review"
+            onClick={returnHome}
+            title="Home"
+          >
+            <ArtifactMark className="as-catalog__brand-mark" />
+          </a>
+          <IconButton
+            keyShortcuts="["
+            label="Artifacts ([)"
+            onClick={() => setCatalogOpen(true)}
+          >
+            <HugeiconsIcon icon={LayoutLeftIcon} strokeWidth={1.8} />
+          </IconButton>
+          <span className="as-rail__spacer" />
+          <IconButton
+            label={theme === "moon" ? "Use light theme" : "Use dark theme"}
+            onClick={onThemeChange}
+          >
+            <HugeiconsIcon icon={theme === "moon" ? Sun03Icon : Moon02Icon} strokeWidth={1.8} />
+          </IconButton>
+          <a
+            aria-label="Settings"
+            className="as-icon-button"
+            href={selectedProject === null
+              ? "/review/settings/projects"
+              : `/review/settings/projects/${encodeURIComponent(selectedProject.id)}`}
+            title="Settings"
+          >
+            <HugeiconsIcon icon={Settings02Icon} strokeWidth={1.8} />
+          </a>
+        </nav>
+      ) : null}
       {!focusMode && catalogMotion.mounted ? (
         <div className="as-panel-assembly" data-side="left">
           <motion.div
@@ -1649,17 +1704,15 @@ function ArtifactReview({
                 >
                   {previewKind === "html" && canComment ? (
                     <button
+                      aria-label={htmlAnnotateModeActive ? "Done commenting (C)" : "Comment (C)"}
                       aria-pressed={htmlAnnotateModeActive}
                       className="as-button as-focus-controls__button"
                       data-active={htmlAnnotateModeActive}
                       onClick={() => setHtmlAnnotateModeActive((active) => !active)}
-                      title={htmlAnnotateModeActive
-                        ? "Annotate mode: click an element or select text to comment. Press Escape to interact."
-                        : "Interact mode: links and controls work normally. Select text or turn annotation mode back on to comment."}
+                      title={htmlAnnotateModeActive ? "Done commenting (C)" : "Comment (C)"}
                       type="button"
                     >
-                      <HugeiconsIcon aria-hidden="true" icon={Edit02Icon} strokeWidth={1.8} />
-                      {htmlAnnotateModeActive ? "Annotate mode" : "Interact mode"}
+                      <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
                     </button>
                   ) : null}
                   <button
@@ -1673,8 +1726,7 @@ function ArtifactReview({
                     title="Toggle comments (])"
                     type="button"
                   >
-                    <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
-                    Comments
+                    <HugeiconsIcon aria-hidden="true" icon={LayoutLeftIcon} strokeWidth={1.8} />
                     <span className="as-focus-controls__count">{openCommentCount}</span>
                   </button>
                   <ReviewShareControl
@@ -1693,11 +1745,11 @@ function ArtifactReview({
                     aria-keyshortcuts="F"
                     className="as-button as-focus-controls__button"
                     onClick={exitFocusMode}
-                    title="Exit full screen (F)"
+                    title="Stop presenting (P)"
                     type="button"
                   >
                     <HugeiconsIcon aria-hidden="true" icon={ArrowShrinkIcon} strokeWidth={1.8} />
-                    Exit full screen
+                    Stop presenting
                   </button>
                   <button
                     aria-label="Hide viewer controls"
@@ -1761,30 +1813,9 @@ function ArtifactReview({
           ) : null}
           <header className="as-pane-header as-preview-header">
             <div className="as-preview-header__identity">
-              {!catalogOpen ? (
-                <IconButton
-                  keyShortcuts="["
-                  label="Open artifact catalog"
-                  onClick={() => setCatalogOpen(true)}
-                  title="Open artifact catalog ([)"
-                >
-                  <HugeiconsIcon icon={LayoutLeftIcon} strokeWidth={1.8} />
-                </IconButton>
-              ) : null}
               <h1>{details?.artifact.name ?? selectedItem?.artifact.name ?? "Artifact Server"}</h1>
             </div>
             <div className="as-preview-header__actions">
-              {previewKind === "html" && canComment ? (
-                <IconButton
-                  active={htmlAnnotateModeActive}
-                  label={htmlAnnotateModeActive
-                    ? "Annotate mode: click an element or select text to comment. Press Escape to interact."
-                    : "Interact mode: links and controls work normally. Select text or turn annotation mode back on to comment."}
-                  onClick={() => setHtmlAnnotateModeActive((active) => !active)}
-                >
-                  <HugeiconsIcon icon={Edit02Icon} strokeWidth={1.8} />
-                </IconButton>
-              ) : null}
               <button
                 aria-label={opening ? "Opening raw artifact" : "Open raw artifact"}
                 className="as-button as-button--secondary as-preview-header__raw"
@@ -1807,39 +1838,54 @@ function ArtifactReview({
                 className="as-button as-button--secondary"
                 download={download}
               />
-              <button
-                aria-label="Full screen"
-                aria-keyshortcuts="F"
-                className="as-button as-button--primary"
+              <IconButton
                 disabled={selectedVersionId === null}
+                keyShortcuts="P"
+                label="Present (P)"
                 onClick={enterFocusMode}
-                title="Full screen (F)"
-                type="button"
               >
-                <HugeiconsIcon aria-hidden="true" icon={FullScreenIcon} strokeWidth={1.8} />
-                <span className="as-button__label">Full screen</span>
-              </button>
-              {!inspectorOpen ? (
-                <button
-                  aria-keyshortcuts="]"
-                  className="as-button as-button--secondary"
+                <HugeiconsIcon icon={Presentation01Icon} strokeWidth={1.8} />
+              </IconButton>
+              <button
+                  aria-keyshortcuts="C"
+                  aria-pressed={htmlAnnotateModeActive}
+                  className="as-button as-button--secondary as-comment-mode-button"
+                  data-active={htmlAnnotateModeActive}
+                  disabled={previewKind !== "html" || !canComment}
+                  onClick={() => setHtmlAnnotateModeActive((active) => !active)}
+                  title={htmlAnnotateModeActive ? "Done commenting (C)" : "Comment (C)"}
+                  type="button"
+                >
+                  <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
+                  {openCommentCount === 0 ? null : (
+                    <span className="as-button__label">{openCommentCount}</span>
+                  )}
+                </button>
+              {inspectorOpen ? null : (
+                <IconButton
+                  keyShortcuts="]"
+                  label="All comments (])"
                   onClick={() => {
                     setInspectorTab("comments");
                     setInspectorOpen(true);
                   }}
-                  title="Comments (])"
-                  type="button"
                 >
-                  <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
-                  <span className="as-button__label">
-                    {openCommentCount === 0 ? "Comment" : `${openCommentCount}`}
-                  </span>
-                </button>
-              ) : null}
+                  <HugeiconsIcon icon={LayoutLeftIcon} strokeWidth={1.8} />
+                </IconButton>
+              )}
             </div>
           </header>
 
           <div className="as-preview-panel__body" data-preview-kind={previewKind}>
+            {popoverOpen ? (
+              <ThreadPopover
+                canComment={canComment}
+                onClose={() => setPopoverOpen(false)}
+                point={popoverPoint}
+                principalId={session.principal.id}
+                session={comments}
+              />
+            ) : null}
             {detailError === null ? null : (
               <div className="as-preview-error" role="alert">{detailError.message}</div>
             )}
@@ -1861,16 +1907,13 @@ function ArtifactReview({
                 isLight={theme === "dawn"}
                 onOpenRawArtifact={() => void openRawArtifact()}
                 onAnnotateModeChange={setHtmlAnnotateModeActive}
+                agentCursors={agentCursors}
+                onCommentModeToggle={() => setHtmlAnnotateModeActive((active) => !active)}
+                onPoint={setPopoverPoint}
                 onSelectAnnotation={(threadId) => {
                   comments.selectThread(threadId);
-                  if (threadId !== null) {
-                    setInspectorTab("comments");
-                    if (focusMode) {
-                      setFocusCommentsOpen(true);
-                    } else {
-                      setInspectorOpen(true);
-                    }
-                  }
+                  // Claude artifacts: a thread opens in a popover by its marker.
+                  setPopoverOpen(threadId !== null);
                 }}
                 onSubmitAnnotation={async (body, anchor, path) => {
                   const saved = await comments.submit(body, anchor, path);
@@ -1884,12 +1927,7 @@ function ArtifactReview({
                       versionId: selectedVersionId,
                     }, body);
                   }
-                  if (saved) {
-                    setInspectorTab("comments");
-                    if (!focusMode) {
-                      setInspectorOpen(true);
-                    }
-                  }
+                  if (saved) setPopoverOpen(true);
                   return saved;
                 }}
                 onUnanchoredChange={comments.updateUnanchored}
@@ -2832,4 +2870,13 @@ function reviewPreviewKind(
 function compactId(value: string): string {
   const unprefixed = value.startsWith("ver_") ? value.slice(4) : value;
   return unprefixed.slice(0, 8);
+}
+
+const agentPalette = ["#d97757", "#6a9bcc", "#788c5d", "#b07cc6", "#cc8b3c", "#4f9a94"];
+
+/** A stable colour per agent name, so each agent keeps its cursor colour. */
+function agentColor(name: string): string {
+  let hash = 0;
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return agentPalette[hash % agentPalette.length] ?? "#d97757";
 }

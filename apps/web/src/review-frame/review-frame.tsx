@@ -6,6 +6,7 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { withBaseHref } from "./base-href.ts";
+import { loadStudioFontCss, withStudioInjection } from "./studio-injection.ts";
 import {
   hostMessageSchema,
   reviewAnchorFrom,
@@ -21,6 +22,9 @@ interface ReviewSession {
   readonly annotations: Annotation[];
   readonly entryPath: string;
   readonly html: string;
+  readonly isLight: boolean;
+  /** Artifact document with its base href, before the studio head block. */
+  readonly sourceHtml: string;
   readonly readOnly: boolean;
   readonly supportsAnnotateMode: boolean;
 }
@@ -46,15 +50,22 @@ function toAnnotation(review: ReviewAnnotation): Annotation {
   return annotation;
 }
 
-function sessionFrom(init: ReviewInit): ReviewSession {
+function sessionFrom(init: ReviewInit, fontCss: string): ReviewSession {
+  const sourceHtml = withBaseHref(init.html, init.baseHref);
   return {
     annotateModeActive: init.annotateModeActive ?? true,
     annotations: init.annotations.map(toAnnotation),
     entryPath: init.entryPath,
-    html: withBaseHref(init.html, init.baseHref),
+    html: withStudioInjection(sourceHtml, init.isLight, fontCss),
+    isLight: init.isLight,
     readOnly: init.readOnly,
+    sourceHtml,
     supportsAnnotateMode: init.annotateModeActive !== undefined,
   };
+}
+
+function sandboxWindow(): Window | null {
+  return document.querySelector("iframe")?.contentWindow ?? null;
 }
 
 /** Adopt the host's palette so the viewer chrome and the sandbox agree. */
@@ -77,6 +88,8 @@ export function ReviewFrame(): React.ReactNode {
   const [selectedThreadId, setSelectedThreadId] = useState<string | null>(null);
   const viewerRef = useRef<ViewerHandle | null>(null);
   const paintedIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
+  const fontCssRef = useRef("");
+  const cursorsRef = useRef<readonly unknown[]>([]);
 
   const send = useCallback((message: FrameMessage): void => {
     window.parent.postMessage(message, window.location.origin);
@@ -97,11 +110,29 @@ export function ReviewFrame(): React.ReactNode {
         paintedIdsRef.current = new Set(
           message.annotations.map((annotation) => annotation.threadId),
         );
-        setSession(sessionFrom(message));
+        void loadStudioFontCss().then((fontCss) => {
+          fontCssRef.current = fontCss;
+          setSession(sessionFrom(message, fontCss));
+        });
         return;
       }
       if (message.type === "as-review-theme") {
         applyTheme(message);
+        // The artifact follows the reader's theme too: re-render it themed.
+        setSession((current) =>
+          current === null || current.isLight === message.isLight
+            ? current
+            : {
+              ...current,
+              html: withStudioInjection(current.sourceHtml, message.isLight, fontCssRef.current),
+              isLight: message.isLight,
+            }
+        );
+        return;
+      }
+      if (message.type === "as-review-cursors") {
+        cursorsRef.current = message.cursors;
+        sandboxWindow()?.postMessage({cursors: message.cursors, type: "studio-cursors"}, "*");
         return;
       }
       if (message.type === "as-review-annotations") {
@@ -121,12 +152,28 @@ export function ReviewFrame(): React.ReactNode {
       }
       setSelectedThreadId(message.threadId);
     };
+    // Messages the studio script inside the sandbox sends up.
+    const onSandbox = (event: MessageEvent<unknown>): void => {
+      const sandbox = sandboxWindow();
+      if (sandbox === null || event.source !== sandbox) return;
+      const data = event.data as {type?: unknown; x?: unknown; y?: unknown} | null;
+      if (data?.type === "studio-click" && typeof data.x === "number" && typeof data.y === "number") {
+        const frame = document.querySelector("iframe")?.getBoundingClientRect();
+        send({type: "as-review-point", v: reviewProtocolVersion, x: data.x + (frame?.left ?? 0), y: data.y + (frame?.top ?? 0)});
+      } else if (data?.type === "studio-comment-mode") {
+        send({type: "as-review-comment-mode-toggle", v: reviewProtocolVersion});
+      } else if (data?.type === "studio-ready") {
+        sandbox.postMessage({cursors: cursorsRef.current, type: "studio-cursors"}, "*");
+      }
+    };
+    window.addEventListener("message", onSandbox);
     if (framed) {
       window.addEventListener("message", onMessage);
       send({type: "as-review-ready", v: reviewProtocolVersion});
     }
     return () => {
       window.removeEventListener("message", onMessage);
+      window.removeEventListener("message", onSandbox);
     };
   }, [send]);
 

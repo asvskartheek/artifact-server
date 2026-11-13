@@ -35,6 +35,7 @@ interface PreviewActions {
 
 /** Render one exact immutable manifest entry in the Artifact Server preview surface. */
 export function ReviewPreview({
+  agentCursors,
   annotateModeActive,
   annotations,
   artifactId,
@@ -42,6 +43,8 @@ export function ReviewPreview({
   isLight,
   onOpenRawArtifact,
   onAnnotateModeChange,
+  onCommentModeToggle,
+  onPoint,
   onSelectAnnotation,
   onSubmitAnnotation,
   onUnanchoredChange,
@@ -52,6 +55,7 @@ export function ReviewPreview({
   selectedPath,
   version,
 }: {
+  readonly agentCursors: readonly AgentCursor[];
   readonly annotateModeActive: boolean;
   readonly annotations: readonly ReviewAnnotation[];
   readonly artifactId: string;
@@ -59,6 +63,8 @@ export function ReviewPreview({
   readonly isLight: boolean;
   readonly onOpenRawArtifact: () => void;
   readonly onAnnotateModeChange: (active: boolean) => void;
+  readonly onCommentModeToggle: () => void;
+  readonly onPoint: (point: {readonly x: number; readonly y: number}) => void;
   readonly onSelectAnnotation: (threadId: string | null) => void;
   readonly onSubmitAnnotation: (
     body: string,
@@ -110,6 +116,9 @@ export function ReviewPreview({
     return (
       <HtmlPreview
         actions={commonActions}
+        agentCursors={agentCursors}
+        onCommentModeToggle={onCommentModeToggle}
+        onPoint={onPoint}
         annotateModeActive={annotateModeActive}
         annotations={annotations}
         artifactId={artifactId}
@@ -185,8 +194,18 @@ export function ReviewPreview({
   );
 }
 
+/** One working agent's cursor, parked on the thread it is answering. */
+export interface AgentCursor {
+  readonly color: string;
+  readonly id: string;
+  readonly name: string;
+}
+
 function HtmlPreview({
   actions,
+  agentCursors,
+  onCommentModeToggle,
+  onPoint,
   annotateModeActive,
   annotations,
   artifactId,
@@ -202,6 +221,9 @@ function HtmlPreview({
   version,
 }: {
   readonly actions: PreviewActions;
+  readonly agentCursors: readonly AgentCursor[];
+  readonly onCommentModeToggle: () => void;
+  readonly onPoint: (point: {readonly x: number; readonly y: number}) => void;
   readonly annotateModeActive: boolean;
   readonly annotations: readonly ReviewAnnotation[];
   readonly artifactId: string;
@@ -297,6 +319,15 @@ function HtmlPreview({
         onAnnotateModeChange(message.active);
         return;
       }
+      if (message.type === "as-review-point") {
+        const frame = frameRef.current?.getBoundingClientRect();
+        onPoint({x: message.x + (frame?.left ?? 0), y: message.y + (frame?.top ?? 0)});
+        return;
+      }
+      if (message.type === "as-review-comment-mode-toggle") {
+        onCommentModeToggle();
+        return;
+      }
       void (async () => {
         const saved = await onSubmitAnnotation(message.body, message.anchor, entry.path);
         if (!saved) {
@@ -314,11 +345,22 @@ function HtmlPreview({
     annotations,
     entry.path,
     onAnnotateModeChange,
+    onCommentModeToggle,
+    onPoint,
     onSelectAnnotation,
     onSubmitAnnotation,
     onUnanchoredChange,
     postToFrame,
   ]);
+
+  useEffect(() => {
+    if (!frameReady) return;
+    postToFrame({
+      cursors: agentCursors.map((cursor) => ({...cursor})),
+      type: "as-review-cursors",
+      v: reviewProtocolVersion,
+    });
+  }, [agentCursors, frameReady, postToFrame, previewDocument]);
 
   useEffect(() => {
     if (!frameReady || previewDocument === null || initialisedRef.current) return;

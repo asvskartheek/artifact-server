@@ -4252,3 +4252,99 @@ textarea {
     animation: none;
   }
 }
+
+/* ---------- Round 2 ---------- */
+
+/* Slim left rail when the artifact list is closed: logo, list, theme, settings. */
+.as-rail {
+  align-items: center;
+  display: flex;
+  flex: 0 0 3rem;
+  flex-direction: column;
+  gap: 0.35rem;
+  padding: 0.6rem 0;
+}
+
+.as-rail__brand {
+  display: grid;
+  height: 2rem;
+  margin-bottom: 0.4rem;
+  place-items: center;
+  width: 2rem;
+}
+
+.as-rail__spacer {
+  flex: 1;
+}
+
+/* Comment mode is a pressed state on one button, like Claude's "Comment". */
+.as-comment-mode-button[data-active="true"] {
+  background: var(--as-clay);
+  border-color: var(--as-clay);
+  color: #fff;
+}
+
+/* Thread popover floating by its marker. */
+.as-preview-panel__body {
+  position: relative;
+}
+
+.as-thread-popover {
+  animation: as-pop-in 120ms ease-out both;
+  max-height: min(28rem, calc(100vh - 2rem));
+  overflow: auto;
+  position: fixed;
+  z-index: 60;
+}
+
+.as-thread-popover .as-comment-card {
+  box-shadow: 0 0 0 1px var(--as-border), var(--as-shadow-pop);
+}
+
+.as-thread-popover .as-comment-card > header .as-button {
+  font-size: 0.72rem;
+  margin-left: auto;
+  min-height: 1.6rem;
+  padding: 0.15rem 0.5rem;
+}
+
+.as-thread-popover .as-comment-replies {
+  display: grid;
+  gap: 0.5rem;
+  list-style: none;
+  margin: 0;
+  padding: 0 0.75rem 0.6rem;
+}
+
+.as-thread-popover .as-comment-replies header {
+  align-items: baseline;
+  display: flex;
+  font-size: 0.75rem;
+  gap: 0.4rem;
+}
+
+.as-thread-popover .as-comment-replies time {
+  color: var(--as-subtle);
+  font-size: 0.68rem;
+}
+
+.as-thread-popover .as-comment-replies p {
+  margin: 0.15rem 0 0;
+}
+
+.as-thread-popover .as-comment-reply-composer {
+  padding: 0 0.75rem 0.75rem;
+}
+
+@keyframes as-pop-in {
+  from {
+    opacity: 0;
+    transform: translateY(4px) scale(0.98);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .as-thread-popover {
+    animation: none;
+  }
+}

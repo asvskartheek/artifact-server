@@ -101,6 +101,13 @@ export function CommentComposer({
           setBody(event.currentTarget.value);
           onBodyChange?.(event.currentTarget.value);
         }}
+        onKeyDown={(event) => {
+          // Claude artifacts: Return or Cmd+Return posts, Shift+Return is a new line.
+          if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+            event.preventDefault();
+            void submit();
+          }
+        }}
         placeholder="Add a comment, or @agent to ask for a change"
         value={body}
       />

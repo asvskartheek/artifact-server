@@ -96,6 +96,15 @@ export const hostMessageSchema = z.discriminatedUnion("type", [
     type: z.literal("as-review-focus"),
     v: versionSchema,
   }),
+  z.object({
+    cursors: z.array(z.object({
+      color: z.string().regex(/^#[0-9a-f]{6}$/iu),
+      id: z.string().min(1).max(200),
+      name: z.string().min(1).max(120),
+    })).max(64),
+    type: z.literal("as-review-cursors"),
+    v: versionSchema,
+  }),
 ]);
 
 export type HostMessage = z.infer<typeof hostMessageSchema>;
@@ -130,6 +139,17 @@ export const frameMessageSchema = z.discriminatedUnion("type", [
   z.object({
     threadIds: z.array(z.string()),
     type: z.literal("as-review-unanchored"),
+    v: versionSchema,
+  }),
+  /** Where the reader last clicked, in review-frame viewport pixels. */
+  z.object({
+    type: z.literal("as-review-point"),
+    v: versionSchema,
+    x: z.number(),
+    y: z.number(),
+  }),
+  z.object({
+    type: z.literal("as-review-comment-mode-toggle"),
     v: versionSchema,
   }),
 ]);

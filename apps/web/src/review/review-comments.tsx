@@ -575,11 +575,13 @@ function NewThreadComposer({
 /** One thread's reply composer, drafted per thread. */
 function ReplyComposer({
   artifactId,
+  initiallyExpanded = false,
   principalId,
   session,
   thread,
 }: {
   readonly artifactId: string;
+  readonly initiallyExpanded?: boolean;
   readonly principalId: string;
   readonly session: ReviewCommentSession;
   readonly thread: CommentThread;
@@ -590,7 +592,7 @@ function ReplyComposer({
     threadId: thread.id,
     versionId: null,
   });
-  const [expanded, setExpanded] = useState(draft.restored);
+  const [expanded, setExpanded] = useState(draft.restored || initiallyExpanded);
   const [replyBody, setReplyBody] = useState(draft.initialBody);
 
   if (!expanded) {
@@ -1042,5 +1044,103 @@ function ReviewReply({
         </div>
       )}
     </li>
+  );
+}
+
+/**
+ * Claude-artifacts style: one thread opens in a small card floating beside
+ * where it lives on the page, not in a side panel. Escape or clicking away
+ * closes it.
+ */
+export function ThreadPopover({
+  canComment,
+  onClose,
+  point,
+  principalId,
+  session,
+}: {
+  readonly canComment: boolean;
+  readonly onClose: () => void;
+  readonly point: {readonly x: number; readonly y: number} | null;
+  readonly principalId: string;
+  readonly session: ReviewCommentSession;
+}) {
+  const thread = session.threads.find((candidate) => candidate.id === session.selectedThreadId);
+  const cardRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (thread === undefined) return undefined;
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") onClose();
+    };
+    const onDown = (event: PointerEvent): void => {
+      if (cardRef.current !== null && !cardRef.current.contains(event.target as Node)) onClose();
+    };
+    window.addEventListener("keydown", onKey);
+    window.addEventListener("pointerdown", onDown);
+    return () => {
+      window.removeEventListener("keydown", onKey);
+      window.removeEventListener("pointerdown", onDown);
+    };
+  }, [onClose, thread]);
+  if (thread === undefined || session.artifactId === null) return null;
+  const replies = session.repliesByThread.get(thread.id) ?? [];
+  const width = 340;
+  const left = Math.min(
+    Math.max(12, (point?.x ?? window.innerWidth - width - 24) + 16),
+    window.innerWidth - width - 12,
+  );
+  const top = Math.min(Math.max(12, (point?.y ?? 96) - 24), window.innerHeight - 320);
+  const working = session.agentWorking.get(thread.id);
+  return (
+    <aside
+      aria-label={`Comment by ${thread.author.displayName}`}
+      className="as-thread-popover"
+      ref={cardRef}
+      style={{left, top, width}}
+    >
+      <article className="as-comment-card" data-selected="true">
+        <header data-initial={thread.author.displayName.slice(0, 1).toUpperCase()}>
+          <strong>{thread.author.displayName}</strong>
+          <button
+            className="as-button"
+            disabled={!canComment}
+            onClick={() => void session.changeState(thread)}
+            title={thread.state === "open" ? "Resolve" : "Reopen"}
+            type="button"
+          >
+            {thread.state === "open" ? "✓ Resolve" : "Reopen"}
+          </button>
+        </header>
+        <div className="as-comment-card__body">
+          <p>{thread.body}</p>
+        </div>
+        {replies.length === 0 ? null : (
+          <ol className="as-comment-replies">
+            {replies.map((reply) => (
+              <li data-agent={reply.author.principalKind === "service"} key={reply.id}>
+                <header>
+                  <strong>{reply.author.displayName}</strong>
+                  <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
+                </header>
+                <p>{reply.body}</p>
+              </li>
+            ))}
+          </ol>
+        )}
+        {working === undefined ? null : (
+          <p className="as-agent-working" role="status">{`${working} is working…`}</p>
+        )}
+        {canComment && thread.state === "open" ? (
+          <ReplyComposer
+            artifactId={session.artifactId}
+            initiallyExpanded
+            key={thread.id}
+            principalId={principalId}
+            session={session}
+            thread={thread}
+          />
+        ) : null}
+      </article>
+    </aside>
   );
 }
