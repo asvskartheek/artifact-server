@@ -1074,19 +1074,18 @@ export function ThreadPopover({
   const cardRef = useRef<HTMLElement | null>(null);
   // Measured placement: the whole card always stays inside the window.
   const [place, setPlace] = useState<{left: number; top: number} | null>(null);
-  const width = 340;
+  const width = 300;
   const margin = 12;
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (card === null) return;
     const height = card.offsetHeight;
-    const anchorX = point?.x ?? window.innerWidth - width - 24;
     const anchorY = point?.y ?? 96;
-    // Right of the bubble when it fits, else left of it.
-    const right = anchorX + 16;
-    const left = right + width + margin <= window.innerWidth ? right : anchorX - width - 16;
+    // Google Docs: the card lives in the right margin, level with its text.
+    const pane = card.parentElement?.getBoundingClientRect();
+    const left = (pane?.right ?? window.innerWidth) - width - 20;
     setPlace({
-      left: Math.min(Math.max(margin, left), window.innerWidth - width - margin),
+      left: Math.max(margin, left),
       top: Math.min(Math.max(margin, anchorY - 24), Math.max(margin, window.innerHeight - height - margin)),
     });
   }, [point, thread?.id, session.repliesByThread]);

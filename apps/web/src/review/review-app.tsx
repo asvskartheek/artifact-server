@@ -624,9 +624,10 @@ function ArtifactReview({
   // Open threads in page order, for the header's ‹ n/N › navigator.
   const openThreads = useMemo(
     () => comments.threads
-      .filter((thread) => thread.state === "open")
+      // Only threads with a bubble on this page; the rest live in the ] list.
+      .filter((thread) => thread.state === "open" && !comments.unanchoredIds.includes(thread.id))
       .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt)),
-    [comments.threads],
+    [comments.threads, comments.unanchoredIds],
   );
   const [locateRequest, setLocateRequest] = useState<{readonly n: number; readonly threadId: string} | null>(null);
   const showThread = useCallback((threadId: string): void => {

@@ -4297,8 +4297,43 @@ textarea {
   z-index: 60;
 }
 
+/* Docs-style margin card: quiet until hovered. */
 .as-thread-popover .as-comment-card {
-  box-shadow: 0 0 0 1px var(--as-border), var(--as-shadow-pop);
+  border-radius: 0.6rem;
+  box-shadow: 0 1px 2px rgb(20 20 19 / 8%), 0 2px 8px rgb(20 20 19 / 6%);
+}
+
+.as-thread-popover .as-comment-card[data-selected="true"] {
+  box-shadow: 0 0 0 1px var(--as-border), 0 1px 2px rgb(20 20 19 / 8%), 0 2px 8px rgb(20 20 19 / 6%);
+}
+
+.as-thread-popover .as-comment-card > header {
+  padding: 0.6rem 0.7rem 0.15rem;
+}
+
+.as-thread-popover .as-comment-card > header::before {
+  font-size: 0.62rem;
+  height: 1.35rem;
+  width: 1.35rem;
+}
+
+.as-thread-popover .as-comment-card > header strong {
+  font-size: 0.74rem;
+}
+
+.as-thread-popover .as-comment-card__body > p,
+.as-thread-popover .as-comment-replies p {
+  font-size: 0.85rem;
+  line-height: 1.45;
+}
+
+.as-thread-popover__resolve {
+  border-color: transparent !important;
+  opacity: 0.55;
+}
+
+.as-thread-popover:hover .as-thread-popover__resolve {
+  opacity: 1;
 }
 
 .as-thread-popover .as-comment-card > header .as-button {
