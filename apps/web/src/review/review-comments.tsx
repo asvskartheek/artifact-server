@@ -27,6 +27,7 @@ import {CommentComposer} from "@/components/comments/comment-composer";
 import {useCommentDraft} from "@/components/comments/comment-drafts";
 import {maximumCommentBodyCharacters} from "@/components/comments/comment-limits";
 import {CommentBody} from "@/components/comments/sketch";
+import {routeComment, sessionFromTags} from "@/components/comments/routing";
 import {
   mergeThreads,
   threadWatermark,
@@ -69,24 +70,6 @@ export function replyAuthor(reply: CommentReply, agentNames: ReadonlyMap<string,
 
 function readAutoSend(): boolean {
   return window.localStorage.getItem(autoSendKey) !== "false";
-}
-
-/** The agent an `@name` mention names, else the default one; null when none is connected. */
-export function pickAgent(
-  agents: readonly AgentPresence[],
-  body: string,
-  preferredId: string | null,
-): AgentPresence | null {
-  const connected = agents
-    .filter((agent) => agent.connected)
-    .toSorted((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
-  const mentioned = connected.find((agent) =>
-    new RegExp(`(^|\\s)@${agent.displayName.replace(/[^\w-]/gu, "")}\\b`, "iu").test(body)
-  );
-  return mentioned
-    ?? connected.find((agent) => agent.id === preferredId)
-    ?? connected[0]
-    ?? null;
 }
 
 async function sendThreadToAgent(
@@ -200,6 +183,13 @@ export interface ReviewCommentSession {
   /** Threads auto-sent in this tab that their agent has not answered yet, with that agent's name. */
   readonly agentWorking: ReadonlyMap<string, string>;
   readonly autoSend: boolean;
+  readonly agents: readonly AgentPresence[];
+  readonly handTo: (threadId: string, agent: AgentPresence) => Promise<void>;
+  /** Live and owner sessions of this artifact, as display names. */
+  readonly liveSessionName: string | null;
+  readonly ownerSessionName: string | null;
+  /** Threads waiting for a session that isn't connected (value: whose). */
+  readonly waiting: ReadonlyMap<string, string | null>;
   /** Agent display name per thread it was sent to; "" maps to the connected agent. */
   readonly agentNames: ReadonlyMap<string, string>;
   /** Name of the agent a new comment goes to, or null when none is connected. */
@@ -232,11 +222,14 @@ export interface ReviewCommentSession {
 /** Keep one Review version's saved threads and Plannotator projections in sync. */
 export function useReviewComments({
   artifactId,
+  artifactTags,
   onVersionChanged,
   projectId,
   versionId,
 }: {
   readonly artifactId: string | null;
+  /** owner:/live: session tags decide who answers (see routing.ts). */
+  readonly artifactTags: readonly string[];
   readonly onVersionChanged: (versionId: string) => void;
   readonly projectId: string;
   readonly versionId: string | null;
@@ -268,8 +261,24 @@ export function useReviewComments({
     void loadAgents();
   }, [loadAgents]);
   useCommentPoll(loadAgents, projectId !== "");
-  const [preferredAgentId, setPreferredAgentId] = useState<string | null>(null);
-  const autoSendAgent = pickAgent(agents, "", preferredAgentId);
+  // Which agent session answered each thread here (follow-ups go back to it),
+  // and threads waiting because their session isn't connected.
+  const [threadSession, setThreadSession] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const [waiting, setWaiting] = useState<ReadonlyMap<string, string | null>>(new Map());
+  const liveRoute = routeComment({agents, answeringSession: null, body: "", tags: artifactTags});
+  const autoSendAgent = liveRoute.kind === "send" ? liveRoute.agent : null;
+  const liveSession = sessionFromTags(artifactTags, "live:");
+  const ownerSession = sessionFromTags(artifactTags, "owner:");
+  const sessionName = (key: string | null): string | null => key === null
+    ? null
+    : agents.find((agent) => agent.agentSessionId === key)?.displayName ?? `session ${key.slice(0, 6)}`;
+  /** Hand a waiting thread to a connected agent the reader picked. */
+  const handTo = useCallback(async (threadId: string, agent: AgentPresence): Promise<void> => {
+    await sendThreadToAgent(agent, projectId, threadId);
+    setAgentSent((current) => new Map([...current, [threadId, agent.displayName]]));
+    setThreadSession((current) => new Map([...current, [threadId, agent.agentSessionId]]));
+    setWaiting((current) => new Map([...current].filter(([id]) => id !== threadId)));
+  }, [projectId]);
   const watermarkRef = useRef<string | null>(null);
   const reloadGenerationRef = useRef(0);
   const threadUpdatedAtRef = useRef<ReadonlyMap<string, string>>(new Map());
@@ -397,17 +406,19 @@ export function useReviewComments({
           crypto.randomUUID(),
         )
       );
-      const target = pickAgent(agents, body, preferredAgentId);
-      const mentioned = target !== null
-        && new RegExp(`@${target.displayName.replace(/[^\w-]/gu, "")}\\b`, "iu").test(body);
-      if (target !== null && (autoSend || mentioned)) {
+      const route = routeComment({agents, answeringSession: null, body, tags: artifactTags});
+      const mentioned = route.kind === "send"
+        && new RegExp(`@${route.agent.displayName.replace(/[^\w-]/gu, "")}\\b`, "iu").test(body);
+      if (route.kind === "send" && (autoSend || mentioned)) {
         try {
-          await sendThreadToAgent(target, projectId, created.thread.id);
-          setPreferredAgentId(target.id);
-          setAgentSent((current) => new Map([...current, [created.thread.id, target.displayName]]));
+          await sendThreadToAgent(route.agent, projectId, created.thread.id);
+          setAgentSent((current) => new Map([...current, [created.thread.id, route.agent.displayName]]));
+          setThreadSession((current) => new Map([...current, [created.thread.id, route.agent.agentSessionId]]));
         } catch {
           // The comment is saved; a failed hand-off leaves it for a manual send.
         }
+      } else if (route.kind === "wait") {
+        setWaiting((current) => new Map([...current, [created.thread.id, route.waitingFor]]));
       }
       if (created.thread.versionId !== versionId) {
         onVersionChanged(created.thread.versionId);
@@ -422,7 +433,7 @@ export function useReviewComments({
       );
       return false;
     }
-  }, [agents, artifactId, autoSend, onVersionChanged, ownership, preferredAgentId, projectId, reload, versionId]);
+  }, [agents, artifactId, artifactTags, autoSend, onVersionChanged, ownership, projectId, reload, versionId]);
 
   const changeState = useCallback(async (thread: CommentThread): Promise<void> => {
     if (artifactId === null || projectId === "") return;
@@ -456,18 +467,26 @@ export function useReviewComments({
         body,
         idempotencyKey,
       ));
-      // Multi-turn: a reply on a thread an agent is in goes straight back to it.
+      // Multi-turn: a follow-up goes back to the session that answered this thread.
       const agentInThread = (repliesByThread.get(thread.id) ?? [])
         .some((reply) => reply.author.principalKind === "service")
         || agentSent.has(thread.id);
-      const target = pickAgent(agents, body, preferredAgentId);
-      if (target !== null && (agentInThread || autoSend)) {
+      const route = routeComment({
+        agents,
+        answeringSession: threadSession.get(thread.id) ?? null,
+        body,
+        tags: artifactTags,
+      });
+      if (route.kind === "send" && (agentInThread || autoSend)) {
         try {
-          await sendThreadToAgent(target, projectId, thread.id);
-          setAgentSent((current) => new Map([...current, [thread.id, target.displayName]]));
+          await sendThreadToAgent(route.agent, projectId, thread.id);
+          setAgentSent((current) => new Map([...current, [thread.id, route.agent.displayName]]));
+          setThreadSession((current) => new Map([...current, [thread.id, route.agent.agentSessionId]]));
         } catch {
           // The reply is saved; the hand-off can be redone from the list.
         }
+      } else if (route.kind === "wait") {
+        setWaiting((current) => new Map([...current, [thread.id, route.waitingFor]]));
       }
       await reload();
       return true;
@@ -475,7 +494,7 @@ export function useReviewComments({
       setError(caught instanceof Error ? caught : new Error("Reply creation failed."));
       return false;
     }
-  }, [agentSent, agents, artifactId, autoSend, ownership, preferredAgentId, projectId, reload, repliesByThread]);
+  }, [agentSent, agents, artifactId, artifactTags, autoSend, ownership, projectId, reload, repliesByThread, threadSession]);
 
   const updateReply = useCallback(async (
     reply: CommentReply,
@@ -535,6 +554,28 @@ export function useReviewComments({
     agentWorking,
     autoSend,
     agentNames: new Map([["", autoSendAgent?.displayName ?? "Agent"], ...agentSent]),
+    agents,
+    handTo,
+    waiting: new Map([
+      ...threads
+        .filter((thread) =>
+          thread.state === "open"
+          && !agentSent.has(thread.id)
+          && (repliesByThread.get(thread.id) ?? []).at(-1)?.author.principalKind !== "service"
+        )
+        .flatMap((thread) => {
+          const route = routeComment({
+            agents,
+            answeringSession: threadSession.get(thread.id) ?? null,
+            body: "",
+            tags: artifactTags,
+          });
+          return route.kind === "wait" ? [[thread.id, route.waitingFor] as const] : [];
+        }),
+      ...waiting,
+    ]),
+    liveSessionName: sessionName(liveSession),
+    ownerSessionName: sessionName(ownerSession),
     autoSendAgent: autoSendAgent?.displayName ?? null,
     changeState,
     createReply,
@@ -993,6 +1034,13 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                     {`${session.agentWorking.get(thread.id) ?? "Agent"} is working…`}
                   </p>
                 ) : null}
+                {session.waiting.has(thread.id) ? (
+                  <WaitingFor
+                    agents={session.agents}
+                    onHand={(agent) => void session.handTo(thread.id, agent)}
+                    whom={session.waiting.get(thread.id) ?? null}
+                  />
+                ) : null}
                 {view !== "sent" && canComment && thread.state === "open"
                     && session.artifactId !== null ? (
                   <ReplyComposer
@@ -1197,6 +1245,13 @@ export function ThreadPopover({
             ))}
           </ol>
         )}
+        {session.waiting.has(thread.id) ? (
+          <WaitingFor
+            agents={session.agents}
+            onHand={(agent) => void session.handTo(thread.id, agent)}
+            whom={session.waiting.get(thread.id) ?? null}
+          />
+        ) : null}
         {canComment && thread.state === "open" ? (
           <InlineReply key={thread.id} session={session} thread={thread} principalId={principalId} />
         ) : null}
@@ -1255,5 +1310,31 @@ function InlineReply({
       rows={1}
       value={body}
     />
+  );
+}
+
+/** A thread whose session isn't connected waits; the reader may hand it on. */
+function WaitingFor({
+  agents,
+  onHand,
+  whom,
+}: {
+  readonly agents: readonly AgentPresence[];
+  readonly onHand: (agent: AgentPresence) => void;
+  readonly whom: string | null;
+}) {
+  const connected = agents.filter((agent) => agent.connected);
+  return (
+    <div className="as-waiting">
+      <p>{whom === null ? "No agent session is working on this artifact." : `Waiting for ${whom} (not connected).`}</p>
+      {connected.length === 0 ? null : (
+        <div className="as-waiting__agents">
+          <span>Hand to</span>
+          {connected.map((agent) => (
+            <button key={agent.id} onClick={() => onHand(agent)} type="button">{agent.displayName}</button>
+          ))}
+        </div>
+      )}
+    </div>
   );
 }

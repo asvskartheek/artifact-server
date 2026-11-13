@@ -8,6 +8,9 @@
  * shared core; this file only wires it to the live extension API.
  */
 
+import {createHash} from "node:crypto";
+import path from "node:path";
+import {fileURLToPath} from "node:url";
 import {homedir, hostname} from "node:os";
 
 import {Type} from "typebox";
@@ -182,7 +185,11 @@ export default function artifactServerBridge(pi: PiExtensionApi): void {
   pi.on("session_start", async (_event, ctx) => {
     await stopBridge(false);
     const environment = environmentConfiguration();
-    const credentials = await resolveBridgeCredentials(environment, homedir());
+    // Studio: the server keeps its data in the checkout (.artifact-server),
+    // which the bridge reads as "<home>/.artifact-server"; try it after ~.
+    const studioCheckout = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+    const credentials = await resolveBridgeCredentials(environment, homedir())
+      ?? await resolveBridgeCredentials(environment, studioCheckout);
     // One beacon per session: replies and resolves through the tool count
     // against the bundles this session's bridge delivered.
     const beacon = new ActivityBeacon();
@@ -206,13 +213,16 @@ export default function artifactServerBridge(pi: PiExtensionApi): void {
     };
 
     bridge = startBridge({
-      agentSessionId: ctx.sessionManager.getSessionId(),
+      // Same short key `artifactserver publish` stamps as owner:/live: tags.
+      agentSessionId: createHash("sha256").update(ctx.sessionManager.getSessionId(), "utf8").digest("hex").slice(0, 12),
       beacon,
       credentials,
-      displayName: chooseDisplayName(environment, ctx.cwd),
+      // Studio: one agent per session (not per folder), named "pi · <folder>",
+      // so two sessions in one repo never share a comment queue.
+      displayName: `pi · ${chooseDisplayName(environment, ctx.cwd)}`,
       fetchImplementation: fetch,
       host: port,
-      hostname: hostname(),
+      hostname: `${hostname()}\u0000${ctx.sessionManager.getSessionId()}`,
       kind: "pi",
       locations,
       workingDirectory: ctx.cwd,

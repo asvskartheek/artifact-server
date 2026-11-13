@@ -117,6 +117,9 @@ function workerPrompt({body, entry, history, quoted, name}) {
     "(never edit TASK.md, never run shell commands),",
     "with minimal targeted edits (keep everything else byte-identical so parallel edits merge).",
     "If the comment is only a question, do not edit; just answer it.",
+    "House rules for the page: visual or interactive only (diagrams, charts, widgets, cards), no",
+    "paragraph over 60 words, and explainers keep a tiny quiz (data-quiz) every 2-3 sections.",
+    "When asked to explain or clarify, prefer a visual or a quiz over more text.",
     quoted ? `The reviewer selected this text: "${quoted.slice(0, 400)}"` : "The comment is on the whole page.",
     `Comment: ${body}`,
     ...(history.length === 0 ? [] : [

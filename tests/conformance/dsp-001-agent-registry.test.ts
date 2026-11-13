@@ -20,7 +20,7 @@ import {
 } from "../support/runtime-harness.js";
 import {publishNew, type PublishResponse} from "../support/publishing.js";
 
-const connectedWindowMilliseconds = 90 * 1_000;
+const connectedWindowMilliseconds = 35 * 1_000;
 const retentionMilliseconds = 7 * 24 * 60 * 60 * 1_000;
 
 describe("registered agent registry", () => {
@@ -115,7 +115,8 @@ describe("registered agent registry", () => {
     const heartbeatStamp = clock.now().toISOString();
     const heldPoll = agents.claim(registered.id, 3);
     await new Promise((resolve) => setTimeout(resolve, 400));
-    clock.advance(45_000);
+    // Inside the connected window: a held poll keeps the agent connected.
+    clock.advance(connectedWindowMilliseconds - 5_000);
     const duringHeldPoll = agentListSchema.parse(
       await (await agents.listAgents()).json(),
     );

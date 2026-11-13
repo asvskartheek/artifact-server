@@ -11,33 +11,16 @@ const fontFaces = [
   ["Anthropic Serif Text", "Text-Regular", 400],
 ] as const;
 
-let fontCss: Promise<string> | null = null;
-
-async function dataUrl(blob: Blob): Promise<string> {
-  const bytes = new Uint8Array(await blob.arrayBuffer());
-  let binary = "";
-  for (let at = 0; at < bytes.length; at += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
-  }
-  return `data:font/otf;base64,${btoa(binary)}`;
-}
-
 /**
- * The sandbox has an opaque origin, so fonts travel inline as data URLs.
- * A missing font file (they are not committed) just leaves the fallback.
+ * Absolute font URLs on the studio origin. The sandbox may load fonts from any
+ * origin (font-src *), so nothing is fetched here and the frame never needs
+ * network access to the studio itself. /fonts answers with CORS for this.
  */
 export function loadStudioFontCss(): Promise<string> {
-  fontCss ??= Promise.all(fontFaces.map(async ([family, file, weight]) => {
-    try {
-      const response = await fetch(`/fonts/anthropic-serif/AnthropicSerif-${file}.otf`);
-      if (!response.ok) return "";
-      const url = await dataUrl(await response.blob());
-      return `@font-face{font-family:"${family}";font-weight:${weight};font-style:normal;font-display:swap;src:url(${url}) format("opentype");}`;
-    } catch {
-      return "";
-    }
-  })).then((faces) => faces.join(""));
-  return fontCss;
+  const origin = window.location.origin;
+  return Promise.resolve(fontFaces.map(([family, file, weight]) =>
+    `@font-face{font-family:"${family}";font-weight:${weight};font-style:normal;font-display:swap;src:url("${origin}/fonts/anthropic-serif/AnthropicSerif-${file}.otf") format("opentype");}`
+  ).join(""));
 }
 
 /** Make `prefers-color-scheme` answer with the reader's choice, in CSS and JS. */

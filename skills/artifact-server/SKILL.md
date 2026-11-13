@@ -8,6 +8,17 @@ description: Publish, review, organize, and share work with Artifact Server, or 
 Use one skill for Artifact Server work. Route the request before loading detailed
 instructions.
 
+## Before making any artifact
+
+Read [content guidelines](references/content-guidelines.md) and start from
+[the starter](assets/starter.html) (React + Radix + Tailwind, built-in `<Quiz>`).
+Artifacts are visual or interactive only; explainers need a tiny quiz every 2–3
+sections. `artifactserver publish` refuses pages that break these rules and
+prints what to fix: fix them, never pass `--skip-guidelines` unless the user asks.
+
+On this machine the server is the local studio: no sign-in, no API key. Give the
+user the `review` link from the publish output.
+
 ## Route the request
 
 - For publishing, updating, opening, sharing, commenting, tagging, comparing,

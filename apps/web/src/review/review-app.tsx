@@ -625,6 +625,7 @@ function ArtifactReview({
   }, []);
   const comments = useReviewComments({
     artifactId: selectedArtifactId,
+    artifactTags: details?.artifact.tags ?? [],
     onVersionChanged: followCommentVersion,
     projectId,
     versionId: selectedVersionId,
@@ -1868,6 +1869,15 @@ function ArtifactReview({
           <header className="as-pane-header as-preview-header">
             <div className="as-preview-header__identity">
               <h1>{details?.artifact.name ?? selectedItem?.artifact.name ?? "Artifact Server"}</h1>
+              {comments.liveSessionName === null ? null : (
+                <span
+                  className="as-live-chip"
+                  title={comments.ownerSessionName === null ? "" : `Owner: ${comments.ownerSessionName}`}
+                >
+                  <span aria-hidden="true" className="as-live-chip__dot" data-connected={comments.autoSendAgent !== null} />
+                  {comments.liveSessionName}
+                </span>
+              )}
             </div>
             <div className="as-preview-header__actions">
               <button

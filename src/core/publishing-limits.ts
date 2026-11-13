@@ -37,8 +37,13 @@ export const agentDispatchLeaseMilliseconds = 5 * 60 * 1_000;
 /** Heartbeat staleness after which a queued dispatch fails agent_unavailable. */
 export const agentUnavailableStalenessMilliseconds = 15 * 60 * 1_000;
 
-/** Window within which a registered agent's claim polling counts as connected. */
-export const agentConnectedWindowMilliseconds = 90 * 1_000;
+/**
+ * Window within which a registered agent's claim polling counts as connected.
+ * Studio: comments route to one exact session, so a crashed session must read
+ * as gone quickly. Bridges re-poll at the 25 s claim cap; 35 s covers one poll
+ * plus slack.
+ */
+export const agentConnectedWindowMilliseconds = 35 * 1_000;
 
 /** Beacon freshness window; a staler beacon decays to the derived state. */
 export const agentActivityBeaconTtlMilliseconds = 60 * 1_000;

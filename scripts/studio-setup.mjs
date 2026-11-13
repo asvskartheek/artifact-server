@@ -7,14 +7,15 @@
  * 1. installs what is missing: git, pnpm, dependencies, GitHub Copilot CLI
  * 2. starts the studio server in the background (no window)
  * 3. connects GitHub Copilot (CLI + VS Code) over MCP, plus the skill
- * 4. starts the always-on agent, answering comments as "Copilot" in parallel
+ * 4. connects pi (each session joins as its own agent) and starts a shared
+ *    "Copilot" agent that answers only comments handed or @mentioned to it
  *
  * Fully local: everything talks to 127.0.0.1 with the server's own local
  * credential. No API key. Safe to run again; it only fills in what is missing.
  * `node scripts/studio-setup.mjs stop` stops the background processes.
  */
 import {execFileSync, spawn} from "node:child_process";
-import {existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync} from "node:fs";
+import {cpSync, existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {homedir, platform} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -135,7 +136,17 @@ const mcpConfig = existsSync(mcpConfigFile) ? JSON.parse(readFileSync(mcpConfigF
 mcpConfig.mcpServers = {...mcpConfig.mcpServers, "artifact-server": {type: "local", ...mcpServer, tools: ["*"]}};
 writeFileSync(mcpConfigFile, JSON.stringify(mcpConfig, null, 2));
 ok("copilot", ["skill", "add", join(repo, "skills", "artifact-server")]);
+// ~/.agents/skills is the shared Agent Skills location (pi, Copilot, others).
+const sharedSkills = join(homedir(), ".agents", "skills");
+mkdirSync(sharedSkills, {recursive: true});
+cpSync(join(repo, "skills", "artifact-server"), join(sharedSkills, "artifact-server"), {recursive: true});
 say("GitHub Copilot connected (CLI + VS Code): ask it to make an artifact");
+
+// pi sessions join the studio themselves (comments go to the session that's
+// working on an artifact), via the repo's pi bridge extension.
+if (ok("pi", ["--version"])) {
+  if (ok("pi", ["install", join(repo, "integrations", "pi")])) say("pi connected: each pi session becomes a studio agent");
+}
 
 // 4. the always-on agent, played by Copilot, answering comments in parallel
 const agentPid = join(logs, "agent.pid");

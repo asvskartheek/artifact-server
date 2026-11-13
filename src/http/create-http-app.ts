@@ -745,6 +745,19 @@ export function createHttpApp(
       "static-asset",
     ));
 
+  // Studio fonts (Anthropic Serif) ship beside the built assets. Artifacts
+  // render in an opaque-origin sandbox, so font loads are cross-origin: CORS.
+  app.on(["GET", "HEAD"], "/fonts/*", async (context) => {
+    const response = await serveWebAsset(
+      context,
+      dependencies,
+      new URL(context.req.url).pathname,
+      "static-asset",
+    );
+    response.headers.set("Access-Control-Allow-Origin", "*");
+    return response;
+  });
+
   app.on(
     ["GET", "HEAD"],
     "/review-frame",
@@ -4020,14 +4033,27 @@ function isContentBootstrapRequest(requestUrl: URL): boolean {
  * host, so the inherited policy permits network access only to configured
  * content hosts. The frame still cannot reach the trusted application origin.
  */
+/**
+ * Studio: the same short list of public CDNs Claude artifacts allow, so pages
+ * can use component libraries (React, Radix, Tailwind, Mermaid, Chart.js).
+ * Scripts and styles only; fetch/XHR still reach just the content hosts.
+ */
+const artifactLibraryHosts = [
+  "https://esm.sh",
+  "https://cdn.jsdelivr.net",
+  "https://unpkg.com",
+  "https://cdnjs.cloudflare.com",
+  "https://cdn.tailwindcss.com",
+].join(" ");
+
 function reviewFrameContentSecurityPolicy(contentDomain: string): string {
   const httpContent = `http://*.${contentDomain}:*`;
   const httpsContent = `https://*.${contentDomain}`;
   const contentSources = `${httpContent} ${httpsContent}`;
   return [
     "default-src 'none'",
-    `script-src 'self' 'unsafe-inline' ${contentSources}`,
-    `style-src 'self' 'unsafe-inline' ${contentSources}`,
+    `script-src 'self' 'unsafe-inline' ${contentSources} ${artifactLibraryHosts}`,
+    `style-src 'self' 'unsafe-inline' ${contentSources} ${artifactLibraryHosts}`,
     // Preserve the viewer's existing support for authored remote images,
     // fonts, and media. The lease host is still the only remote script,
     // stylesheet, and fetch source, so artifact code cannot send lease-scoped

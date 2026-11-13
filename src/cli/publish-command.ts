@@ -2,7 +2,7 @@ import path from "node:path";
 
 import * as NodeFileSystem from "@effect/platform-node-shared/NodeFileSystem";
 import {Option, type Command} from "commander";
-import {Effect} from "effect";
+import {Effect, Redacted} from "effect";
 
 import {
   type FilePublicationFailure,
@@ -17,6 +17,8 @@ import {
   resolveCliServerConnection,
   type CliServerConnection,
 } from "./cli-server-connection.js";
+import {checkHtmlEntryGuidelines} from "./content-guidelines-files.js";
+import {currentAgentSession, touchArtifact} from "./session-ownership.js";
 import {resumePublicationOperation} from "./publication-operation-store.js";
 
 interface PublishOptions {
@@ -31,6 +33,7 @@ interface PublishOptions {
   readonly profileData: string;
   readonly routing: "spa" | "static";
   readonly server?: string;
+  readonly skipGuidelines: boolean;
   readonly tag: readonly string[];
   readonly tokenFile?: string;
 }
@@ -87,7 +90,21 @@ export function configurePublishCommand(
         "current version ID required when publishing a new version",
       ),
     )
+    .addOption(
+      new Option("--skip-guidelines", "publish even if the HTML breaks the studio content guidelines")
+        .default(false),
+    )
     .action(async (inputPath: string, options: PublishOptions) => {
+      if (!options.skipGuidelines) {
+        const problems = await checkHtmlEntryGuidelines(inputPath, options.entry);
+        if (problems.length > 0) {
+          throw new Error([
+            "Not published: the page breaks the studio content guidelines",
+            "(skills/artifact-server/references/content-guidelines.md). Fix:",
+            ...problems.map((problem) => `  - ${problem}`),
+          ].join("\n"));
+        }
+      }
       let connection = await resolveCliServerConnection(options, "publish");
       const intent = publicationCommand(inputPath, options);
       const prepared = await preparePublication(intent);
@@ -116,6 +133,19 @@ export function configurePublishCommand(
         );
       }
       if (!outcome.success) throw cliPublicationError(outcome.error);
+      // Studio: the publishing agent session becomes the artifact's live session.
+      const session = currentAgentSession();
+      if (session !== null) {
+        await touchArtifact(
+          connection.origin,
+          Redacted.value(connection.apiToken),
+          outcome.result.artifact.projectId,
+          outcome.result.artifact.id,
+          session,
+        ).catch((error: Error) => {
+          console.error(`Published, but marking this session live failed: ${error.message}`);
+        });
+      }
       console.log(JSON.stringify(outcome.result, null, 2));
       await operation.complete();
     });
