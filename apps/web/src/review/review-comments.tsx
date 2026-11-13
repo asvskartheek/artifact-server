@@ -490,8 +490,9 @@ export function useReviewComments({
   const agentWorking = useMemo(() => new Map([...agentSent].filter(([id, name]) => {
     const thread = threads.find((candidate) => candidate.id === id);
     if (thread === undefined || thread.state !== "open") return false;
-    return !(repliesByThread.get(id) ?? []).some((reply) =>
-      reply.author.displayName === name
+    // Replies carry the API key's name, not the agent's, so any agent (service) reply counts.
+    return name !== "" && !(repliesByThread.get(id) ?? []).some((reply) =>
+      reply.author.principalKind === "service"
     );
   })), [agentSent, repliesByThread, threads]);
 
