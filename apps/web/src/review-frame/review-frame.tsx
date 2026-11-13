@@ -6,7 +6,16 @@ import {
 import { useCallback, useEffect, useRef, useState } from "react";
 
 import { withBaseHref } from "./base-href.ts";
+import { z } from "zod";
+
 import { loadStudioFontCss, withStudioInjection } from "./studio-injection.ts";
+
+const sandboxMessageSchema = z.discriminatedUnion("type", [
+  z.object({type: z.literal("studio-click"), x: z.number(), y: z.number()}),
+  z.object({id: z.string().min(1).max(200), type: z.literal("studio-open")}),
+  z.object({type: z.literal("studio-comment-mode")}),
+  z.object({type: z.literal("studio-ready")}),
+]);
 import {
   hostMessageSchema,
   reviewAnchorFrom,
@@ -90,6 +99,7 @@ export function ReviewFrame(): React.ReactNode {
   const paintedIdsRef = useRef<ReadonlySet<string>>(new Set<string>());
   const fontCssRef = useRef("");
   const cursorsRef = useRef<readonly unknown[]>([]);
+  const statusesRef = useRef<Record<string, string>>({});
 
   const send = useCallback((message: FrameMessage): void => {
     window.parent.postMessage(message, window.location.origin);
@@ -110,10 +120,11 @@ export function ReviewFrame(): React.ReactNode {
         paintedIdsRef.current = new Set(
           message.annotations.map((annotation) => annotation.threadId),
         );
-        void loadStudioFontCss().then((fontCss) => {
+        void (async () => {
+          const fontCss = await loadStudioFontCss();
           fontCssRef.current = fontCss;
           setSession(sessionFrom(message, fontCss));
-        });
+        })();
         return;
       }
       if (message.type === "as-review-theme") {
@@ -128,6 +139,15 @@ export function ReviewFrame(): React.ReactNode {
               isLight: message.isLight,
             }
         );
+        return;
+      }
+      if (message.type === "as-review-statuses") {
+        statusesRef.current = message.statuses;
+        sandboxWindow()?.postMessage({statuses: message.statuses, type: "studio-statuses"}, "*");
+        return;
+      }
+      if (message.type === "as-review-locate") {
+        sandboxWindow()?.postMessage({id: message.threadId, type: "studio-locate"}, "*");
         return;
       }
       if (message.type === "as-review-cursors") {
@@ -156,14 +176,20 @@ export function ReviewFrame(): React.ReactNode {
     const onSandbox = (event: MessageEvent<unknown>): void => {
       const sandbox = sandboxWindow();
       if (sandbox === null || event.source !== sandbox) return;
-      const data = event.data as {type?: unknown; x?: unknown; y?: unknown} | null;
-      if (data?.type === "studio-click" && typeof data.x === "number" && typeof data.y === "number") {
+      // The sandbox is untrusted: validate every message it sends up.
+      const parsed = sandboxMessageSchema.safeParse(event.data);
+      if (!parsed.success) return;
+      const data = parsed.data;
+      if (data.type === "studio-click") {
         const frame = document.querySelector("iframe")?.getBoundingClientRect();
         send({type: "as-review-point", v: reviewProtocolVersion, x: data.x + (frame?.left ?? 0), y: data.y + (frame?.top ?? 0)});
-      } else if (data?.type === "studio-comment-mode") {
+      } else if (data.type === "studio-open") {
+        send({threadId: data.id, type: "as-review-select", v: reviewProtocolVersion});
+      } else if (data.type === "studio-comment-mode") {
         send({type: "as-review-comment-mode-toggle", v: reviewProtocolVersion});
-      } else if (data?.type === "studio-ready") {
+      } else {
         sandbox.postMessage({cursors: cursorsRef.current, type: "studio-cursors"}, "*");
+        sandbox.postMessage({statuses: statusesRef.current, type: "studio-statuses"}, "*");
       }
     };
     window.addEventListener("message", onSandbox);

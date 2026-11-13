@@ -13,13 +13,13 @@ const fontFaces = [
 
 let fontCss: Promise<string> | null = null;
 
-function dataUrl(blob: Blob): Promise<string> {
-  return new Promise((resolve, reject) => {
-    const reader = new FileReader();
-    reader.onload = () => resolve(String(reader.result));
-    reader.onerror = () => reject(reader.error ?? new Error("Font read failed."));
-    reader.readAsDataURL(blob);
-  });
+async function dataUrl(blob: Blob): Promise<string> {
+  const bytes = new Uint8Array(await blob.arrayBuffer());
+  let binary = "";
+  for (let at = 0; at < bytes.length; at += 0x8000) {
+    binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000));
+  }
+  return `data:font/otf;base64,${btoa(binary)}`;
 }
 
 /**
@@ -84,13 +84,11 @@ const cursorAndClickScript = `
     root = host.attachShadow ? host.attachShadow({mode: 'open'}) : host;
     var style = document.createElement('style');
     style.textContent = [
-      '.c{position:fixed;left:0;top:0;transition:transform .45s cubic-bezier(.2,.8,.2,1);will-change:transform}',
-      '.c svg{display:block;width:18px;height:18px;filter:drop-shadow(0 1px 2px rgba(20,20,19,.35));animation:w 1.8s ease-in-out infinite}',
-      '.c span{position:absolute;left:14px;top:14px;white-space:nowrap;background:var(--k);color:#fff;font:500 11px/1 system-ui,-apple-system,sans-serif;padding:4px 7px;border-radius:999px 999px 999px 3px;box-shadow:0 1px 3px rgba(20,20,19,.25)}',
-      '.c span::after{content:"";display:inline-block;width:4px;height:4px;margin-left:6px;border-radius:50%;background:#fff;vertical-align:middle;animation:p 1s ease-in-out infinite}',
-      '@keyframes w{0%,100%{transform:translate(0,0)}50%{transform:translate(2px,1px)}}',
-      '@keyframes p{0%,100%{opacity:.35}50%{opacity:1}}',
-      '@media (prefers-reduced-motion: reduce){.c{transition:none}.c svg,.c span::after{animation:none}}'
+      '.c{position:fixed;left:0;top:0;transition:transform .6s cubic-bezier(.2,.8,.2,1);will-change:transform;pointer-events:auto;cursor:pointer}',
+      '.c svg{display:block;width:18px;height:18px;filter:drop-shadow(0 1px 2px rgba(20,20,19,.35))}',
+      '.c span{position:absolute;left:14px;top:14px;white-space:nowrap;background:var(--k);color:#fff;font:500 11px/1 system-ui,-apple-system,sans-serif;font-variant-numeric:tabular-nums;padding:4px 8px;border-radius:999px 999px 999px 3px;box-shadow:0 1px 3px rgba(20,20,19,.25)}',
+      '.c:hover span{filter:brightness(1.08)}',
+      '@media (prefers-reduced-motion: reduce){.c{transition:none}}'
     ].join('');
     root.appendChild(style);
     document.documentElement.appendChild(host);
@@ -102,6 +100,10 @@ const cursorAndClickScript = `
     if (!marker || marker.style.display === 'none') return null;
     return marker.getBoundingClientRect();
   }
+  function clock(ms){
+    var s = Math.max(0, Math.floor(ms / 1000));
+    return Math.floor(s / 60) + ':' + String(s % 60).padStart(2, '0');
+  }
   function place(){
     raf = 0;
     var ids = Object.keys(cursors);
@@ -110,9 +112,18 @@ const cursorAndClickScript = `
       var x = r ? r.right + 2 : window.innerWidth - 140 - i * 16;
       var y = r ? r.bottom - 4 : 72 + i * 30;
       c.style.transform = 'translate(' + Math.round(x) + 'px,' + Math.round(y) + 'px)';
+      // Live elapsed time: proof the agent is alive, not hung.
+      c.label.textContent = c.name + ' \u00b7 ' + clock(Date.now() - c.started);
     }
     if (ids.length) raf = requestAnimationFrame(place);
   }
+  window.addEventListener('message', function(e){
+    if (e.source !== parent || !e.data || e.data.type !== 'studio-locate') return;
+    // Report where a thread lives so its reply card opens right there.
+    var r = markerRect(e.data.id);
+    if (!r) return;
+    parent.postMessage({type: 'studio-click', x: r.right, y: r.top}, '*');
+  });
   window.addEventListener('message', function(e){
     if (e.source !== parent || !e.data || e.data.type !== 'studio-cursors') return;
     ensureHost();
@@ -125,7 +136,14 @@ const cursorAndClickScript = `
       c.style.setProperty('--k', item.color || '#d97757');
       c.style.transform = 'translate(' + (window.innerWidth - 120) + 'px, 40px)';
       c.innerHTML = '<svg viewBox="0 0 18 18"><path d="M2 1.5 15.5 8 9.2 9.6 6.6 16z" fill="' + (item.color || '#d97757') + '" stroke="#fff" stroke-width="1.4" stroke-linejoin="round"/></svg><span></span>';
-      c.querySelector('span').textContent = item.name;
+      c.name = item.name;
+      c.started = Date.now();
+      c.label = c.querySelector('span');
+      c.label.textContent = item.name;
+      c.addEventListener('click', function(ev){
+        ev.stopPropagation();
+        parent.postMessage({type: 'studio-open', id: item.id}, '*');
+      });
       root.appendChild(c);
       cursors[item.id] = c;
     });
@@ -136,6 +154,38 @@ const cursorAndClickScript = `
     });
     if (!raf) raf = requestAnimationFrame(place);
   });
+  // Comment bubbles show their agent status: working pulses, replied gets a dot.
+  var statuses = {};
+  var statusCss = [
+    '.pn-marker[data-studio-status="working"] .pn-marker-icon{animation:studio-pulse 1.1s ease-in-out infinite}',
+    '.pn-marker[data-studio-status="working"]::after{content:"";position:absolute;inset:-5px;border-radius:50%;border:2px solid #d97757;border-top-color:transparent;animation:studio-spin .9s linear infinite}',
+    '.pn-marker[data-studio-status="replied"]::after{content:"";position:absolute;right:-3px;top:-3px;width:9px;height:9px;border-radius:50%;background:#5a8a5e;border:2px solid #fff}',
+    '@keyframes studio-pulse{50%{transform:scale(1.12)}}',
+    '@keyframes studio-spin{to{transform:rotate(1turn)}}',
+    '@media (prefers-reduced-motion: reduce){.pn-marker .pn-marker-icon,.pn-marker::after{animation:none!important}}'
+  ].join('');
+  function paintStatuses(){
+    var overlay = document.querySelector('[data-plannotator-overlay-host]');
+    var scope = overlay && (overlay.shadowRoot || overlay);
+    if (!scope) return;
+    if (!scope.querySelector('style[data-studio-status]')){
+      var st = document.createElement('style');
+      st.setAttribute('data-studio-status', '');
+      st.textContent = statusCss;
+      scope.appendChild(st);
+    }
+    scope.querySelectorAll('.pn-marker').forEach(function(m){
+      var s = statuses[m.getAttribute('data-annotation-id')];
+      if (s) m.setAttribute('data-studio-status', s); else m.removeAttribute('data-studio-status');
+    });
+  }
+  window.addEventListener('message', function(e){
+    if (e.source !== parent || !e.data || e.data.type !== 'studio-statuses') return;
+    statuses = e.data.statuses || {};
+    paintStatuses();
+  });
+  // Markers are re-created as the page scrolls/reflows; keep the badges on.
+  setInterval(paintStatuses, 500);
   parent.postMessage({type: 'studio-ready'}, '*');
 })();
 `;

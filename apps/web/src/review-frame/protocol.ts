@@ -97,6 +97,16 @@ export const hostMessageSchema = z.discriminatedUnion("type", [
     v: versionSchema,
   }),
   z.object({
+    statuses: z.record(z.string(), z.enum(["working", "replied"])),
+    type: z.literal("as-review-statuses"),
+    v: versionSchema,
+  }),
+  z.object({
+    threadId: z.string().min(1),
+    type: z.literal("as-review-locate"),
+    v: versionSchema,
+  }),
+  z.object({
     cursors: z.array(z.object({
       color: z.string().regex(/^#[0-9a-f]{6}$/iu),
       id: z.string().min(1).max(200),

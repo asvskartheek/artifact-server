@@ -11,7 +11,7 @@
  *   editing a private copy of the artifact's entry file.
  * - Finished copies are folded into the newest version with a 3-way merge
  *   (`git merge-file`), published as one new version per merge, then the
- *   worker's reply is posted and the thread resolved.
+ *   worker's reply is posted. The reviewer resolves the thread, not the agent.
  *
  * Env: ARTIFACT_SERVER_ORIGIN  default http://127.0.0.1:8787
  *      STUDIO_AGENT_TOKEN_FILE file with an API key (agent:connect, artifact:*, comment:write)
@@ -112,7 +112,14 @@ function workerPrompt({body, entry, quoted, name}) {
     quoted ? `The reviewer selected this text: "${quoted.slice(0, 400)}"` : "The comment is on the whole page.",
     `Comment: ${body}`,
     "",
-    "Finish with exactly one final line: REPLY: <1-2 sentences to the reviewer saying what you changed>",
+    "Finish with your reply to the reviewer after a line containing only REPLY:",
+    "Keep it to 1-2 sentences saying what you changed. When a picture says it faster (a before/after,",
+    "a flow, a structure), add a sketch block under the sentence. Sketch syntax, one edge per line:",
+    "```sketch",
+    "A[Before: 3-line title] -> B[After: 6 words]!: cut",
+    "B -> C(Reads in 2s)",
+    "```",
+    "[x] = box, (x) = pill, trailing ! = highlight, `: text` labels the arrow. No SVG, no images.",
   ].join("\n");
 }
 
@@ -142,7 +149,9 @@ async function runWorker(thread, base, name) {
     pending.child.stdin?.end(); // headless CLIs (pi -p) wait for stdin EOF otherwise
     return pending;
   });
-  const reply = stdout.match(/REPLY:\s*([\s\S]+)$/m)?.[1]?.trim() ?? stdout.trim().split("\n").at(-1) ?? "Done.";
+  // Everything after the last REPLY: line is the reply (text plus optional sketch).
+  const at = stdout.lastIndexOf("REPLY:");
+  const reply = (at < 0 ? stdout.trim().split("\n").at(-1) : stdout.slice(at + 6).trim()) || "Done.";
   return {edited: await readFile(file, "utf8"), reply: reply.slice(0, 4000)};
 }
 
@@ -183,8 +192,10 @@ async function mergeAndPublish(projectId, artifactId, base, edited) {
 
 async function handleThread(projectId, threadId) {
   const artifactId = await locateThread(projectId, threadId);
-  const {thread} = await api(`/api/v1/artifacts/${artifactId}/comments/${threadId}?projectId=${projectId}`);
+  const {replies, thread} = await api(`/api/v1/artifacts/${artifactId}/comments/${threadId}?projectId=${projectId}`);
   if (thread.state !== "open") return;
+  // Already answered (threads stay open for the reviewer): don't redo it.
+  if (replies.at(-1)?.author.principalKind === "service") return;
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const base = await currentEntry(projectId, artifactId);
     log(`thread ${threadId.slice(-6)} -> worker (attempt ${attempt})`);
@@ -196,11 +207,8 @@ async function handleThread(projectId, threadId) {
       {body: reply},
       {"Idempotency-Key": `agent-${threadId}-${randomUUID()}`},
     );
-    await api(`/api/v1/artifacts/${artifactId}/comments/${threadId}?projectId=${projectId}`, {
-      body: JSON.stringify({state: "resolved"}),
-      method: "PATCH",
-    });
-    log(`thread ${threadId.slice(-6)} ${outcome}, replied, resolved`);
+    // The reviewer resolves; the agent only replies (Claude Docs model).
+    log(`thread ${threadId.slice(-6)} ${outcome}, replied`);
     return;
   }
   await post(

@@ -36,6 +36,8 @@ interface PreviewActions {
 /** Render one exact immutable manifest entry in the Artifact Server preview surface. */
 export function ReviewPreview({
   agentCursors,
+  locateRequest,
+  threadStatuses,
   annotateModeActive,
   annotations,
   artifactId,
@@ -56,6 +58,10 @@ export function ReviewPreview({
   version,
 }: {
   readonly agentCursors: readonly AgentCursor[];
+  /** Ask the page where this thread lives; `n` re-asks for the same thread. */
+  readonly locateRequest: {readonly n: number; readonly threadId: string} | null;
+  /** Agent status per thread, painted on the page's comment bubbles. */
+  readonly threadStatuses: Readonly<Record<string, "replied" | "working">>;
   readonly annotateModeActive: boolean;
   readonly annotations: readonly ReviewAnnotation[];
   readonly artifactId: string;
@@ -117,6 +123,8 @@ export function ReviewPreview({
       <HtmlPreview
         actions={commonActions}
         agentCursors={agentCursors}
+        locateRequest={locateRequest}
+        threadStatuses={threadStatuses}
         onCommentModeToggle={onCommentModeToggle}
         onPoint={onPoint}
         annotateModeActive={annotateModeActive}
@@ -204,6 +212,8 @@ export interface AgentCursor {
 function HtmlPreview({
   actions,
   agentCursors,
+  locateRequest,
+  threadStatuses,
   onCommentModeToggle,
   onPoint,
   annotateModeActive,
@@ -222,6 +232,8 @@ function HtmlPreview({
 }: {
   readonly actions: PreviewActions;
   readonly agentCursors: readonly AgentCursor[];
+  readonly locateRequest: {readonly n: number; readonly threadId: string} | null;
+  readonly threadStatuses: Readonly<Record<string, "replied" | "working">>;
   readonly onCommentModeToggle: () => void;
   readonly onPoint: (point: {readonly x: number; readonly y: number}) => void;
   readonly annotateModeActive: boolean;
@@ -352,6 +364,16 @@ function HtmlPreview({
     onUnanchoredChange,
     postToFrame,
   ]);
+
+  useEffect(() => {
+    if (!frameReady) return;
+    postToFrame({statuses: {...threadStatuses}, type: "as-review-statuses", v: reviewProtocolVersion});
+  }, [frameReady, postToFrame, previewDocument, threadStatuses]);
+
+  useEffect(() => {
+    if (!frameReady || locateRequest === null) return;
+    postToFrame({threadId: locateRequest.threadId, type: "as-review-locate", v: reviewProtocolVersion});
+  }, [frameReady, locateRequest, postToFrame]);
 
   useEffect(() => {
     if (!frameReady) return;

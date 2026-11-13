@@ -19,7 +19,6 @@ import {
   ExternalLinkIcon,
   File01Icon,
   FilterIcon,
-  Presentation01Icon,
   GithubIcon,
   Home01Icon,
   KeyboardIcon,
@@ -560,7 +559,8 @@ function ArtifactReview({
   const [catalogOpen, setCatalogOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(readInitialInspectorOpen);
   const [opening, setOpening] = useState(false);
-  const [focusMode, setFocusMode] = useState(initialLocation.view === "focus");
+  // Studio: present mode is removed; focus links open the normal review.
+  const [focusMode, setFocusMode] = useState(false);
   const [focusCommentsOpen, setFocusCommentsOpen] = useState(false);
   const [focusControlsCollapsed, setFocusControlsCollapsed] = useState(false);
   const [focusControlsHoverArmed, setFocusControlsHoverArmed] = useState(true);
@@ -621,6 +621,54 @@ function ArtifactReview({
     projectId,
     versionId: selectedVersionId,
   });
+  // Open threads in page order, for the header's ‹ n/N › navigator.
+  const openThreads = useMemo(
+    () => comments.threads
+      .filter((thread) => thread.state === "open")
+      .toSorted((a, b) => a.createdAt.localeCompare(b.createdAt)),
+    [comments.threads],
+  );
+  const [locateRequest, setLocateRequest] = useState<{readonly n: number; readonly threadId: string} | null>(null);
+  const showThread = useCallback((threadId: string): void => {
+    comments.selectThread(threadId);
+    setLocateRequest((current) => ({n: (current?.n ?? 0) + 1, threadId}));
+    setPopoverOpen(true);
+  }, [comments]);
+  const stepThread = (direction: 1 | -1): void => {
+    if (openThreads.length === 0) return;
+    const at = openThreads.findIndex((thread) => thread.id === comments.selectedThreadId);
+    const next = openThreads[(at + direction + openThreads.length) % openThreads.length];
+    if (next !== undefined) showThread(next.id);
+  };
+  // Bubble status: working while an agent has it, replied once an agent answered last.
+  const threadStatuses = useMemo(() => {
+    const statuses: Record<string, "replied" | "working"> = {};
+    for (const thread of openThreads) {
+      if (comments.agentWorking.has(thread.id)) statuses[thread.id] = "working";
+      else if (comments.repliesByThread.get(thread.id)?.at(-1)?.author.principalKind === "service") {
+        statuses[thread.id] = "replied";
+      }
+    }
+    return statuses;
+  }, [comments.agentWorking, comments.repliesByThread, openThreads]);
+  // The reply card opens by itself only when an agent's reply lands.
+  const seenReplies = useRef<Map<string, number> | null>(null);
+  useEffect(() => {
+    const counts = new Map(openThreads.map((thread) => [
+      thread.id,
+      (comments.repliesByThread.get(thread.id) ?? []).filter((reply) => reply.author.principalKind === "service").length,
+    ]));
+    const previous = seenReplies.current;
+    seenReplies.current = counts;
+    if (previous === null) return;
+    for (const [id, count] of counts) {
+      if (count > (previous.get(id) ?? count)) {
+        showThread(id);
+        return;
+      }
+    }
+  }, [comments.repliesByThread, openThreads, showThread]);
+
   // One cursor per thread an agent is working on, in that agent's colour.
   const agentCursors = useMemo<readonly AgentCursor[]>(
     () => [...comments.agentWorking].map(([id, name]) => ({
@@ -1223,12 +1271,6 @@ function ArtifactReview({
         return;
       }
 
-      if ((key === "p" || key === "f") && selectedVersionId !== null) {
-        event.preventDefault();
-        if (focusMode) exitFocusMode();
-        else enterFocusMode();
-        return;
-      }
 
       if (key === "]") {
         event.preventDefault();
@@ -1434,8 +1476,11 @@ function ArtifactReview({
             aria-label="Home"
             className="as-rail__brand"
             href="/review"
-            onClick={returnHome}
-            title="Home"
+            onClick={(event) => {
+              event.preventDefault();
+              setCatalogOpen(true);
+            }}
+            title="Artifacts"
           >
             <ArtifactMark className="as-catalog__brand-mark" />
           </a>
@@ -1838,14 +1883,6 @@ function ArtifactReview({
                 className="as-button as-button--secondary"
                 download={download}
               />
-              <IconButton
-                disabled={selectedVersionId === null}
-                keyShortcuts="P"
-                label="Present (P)"
-                onClick={enterFocusMode}
-              >
-                <HugeiconsIcon icon={Presentation01Icon} strokeWidth={1.8} />
-              </IconButton>
               <button
                   aria-keyshortcuts="C"
                   aria-pressed={htmlAnnotateModeActive}
@@ -1857,10 +1894,16 @@ function ArtifactReview({
                   type="button"
                 >
                   <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
-                  {openCommentCount === 0 ? null : (
-                    <span className="as-button__label">{openCommentCount}</span>
-                  )}
                 </button>
+              {openThreads.length === 0 ? null : (
+                <div aria-label="Open comments" className="as-comment-nav" role="group">
+                  <button aria-label="Previous comment" onClick={() => stepThread(-1)} type="button">‹</button>
+                  <span aria-live="polite">
+                    {`${Math.max(1, openThreads.findIndex((thread) => thread.id === comments.selectedThreadId) + 1)}/${openThreads.length}`}
+                  </span>
+                  <button aria-label="Next comment" onClick={() => stepThread(1)} type="button">›</button>
+                </div>
+              )}
               {inspectorOpen ? null : (
                 <IconButton
                   keyShortcuts="]"
@@ -1908,6 +1951,8 @@ function ArtifactReview({
                 onOpenRawArtifact={() => void openRawArtifact()}
                 onAnnotateModeChange={setHtmlAnnotateModeActive}
                 agentCursors={agentCursors}
+                locateRequest={locateRequest}
+                threadStatuses={threadStatuses}
                 onCommentModeToggle={() => setHtmlAnnotateModeActive((active) => !active)}
                 onPoint={setPopoverPoint}
                 onSelectAnnotation={(threadId) => {
@@ -1927,7 +1972,8 @@ function ArtifactReview({
                       versionId: selectedVersionId,
                     }, body);
                   }
-                  if (saved) setPopoverOpen(true);
+                  // Claude: posting doesn't pop anything; the card opens when the reply lands.
+                  if (saved) setPopoverOpen(false);
                   return saved;
                 }}
                 onUnanchoredChange={comments.updateUnanchored}

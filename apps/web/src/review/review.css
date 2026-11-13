@@ -4348,3 +4348,114 @@ textarea {
     animation: none;
   }
 }
+
+/* ---------- Round 3 ---------- */
+
+/* Header comment navigator: ‹ 2/5 › */
+.as-comment-nav {
+  align-items: center;
+  border: 1px solid var(--as-border);
+  border-radius: 0.5rem;
+  display: inline-flex;
+  font-size: 0.78rem;
+  font-variant-numeric: tabular-nums;
+  height: 2.15rem;
+}
+
+.as-comment-nav button {
+  background: none;
+  border: 0;
+  color: var(--as-subtle);
+  cursor: pointer;
+  font-size: 1.05rem;
+  height: 100%;
+  padding: 0 0.55rem;
+}
+
+.as-comment-nav button:hover {
+  color: var(--as-text);
+}
+
+.as-comment-nav span {
+  min-width: 2.4rem;
+  text-align: center;
+}
+
+/* Popover: one quiet check to resolve, one reply line. */
+.as-thread-popover__resolve {
+  background: none;
+  border: 1px solid var(--as-border);
+  border-radius: 999px;
+  color: var(--as-subtle);
+  cursor: pointer;
+  height: 1.6rem;
+  margin-left: auto;
+  width: 1.6rem;
+}
+
+.as-thread-popover__resolve:hover {
+  border-color: #5a8a5e;
+  color: #5a8a5e;
+}
+
+.as-thread-popover__reply {
+  background: var(--secondary);
+  border: 1px solid transparent;
+  border-radius: 0.6rem;
+  display: block;
+  font: inherit;
+  font-family: var(--as-font-serif);
+  margin: 0 0.75rem 0.75rem;
+  padding: 0.45rem 0.65rem;
+  resize: none;
+  width: calc(100% - 1.5rem);
+}
+
+.as-thread-popover__reply:focus {
+  background: var(--card);
+  border-color: var(--as-clay);
+  outline: none;
+}
+
+/* Sketches: hand-drawn diagrams agents send in comments. */
+.as-sketch {
+  color: var(--as-subtle);
+  display: block;
+  margin: 0.4rem 0 0.6rem;
+  max-width: 100%;
+}
+
+.as-sketch text {
+  fill: var(--as-text);
+  font: 400 11px var(--as-font-serif);
+}
+
+.as-sketch .as-sketch__edge {
+  fill: var(--as-subtle);
+  font-family: var(--as-font-ui);
+  font-size: 9.5px;
+}
+
+.as-sketch__fill {
+  fill: var(--card);
+}
+
+.as-sketch__line {
+  stroke: currentColor;
+  stroke-linejoin: round;
+  stroke-width: 1.3;
+}
+
+.as-sketch__node[data-hot="true"] .as-sketch__fill {
+  fill: var(--as-clay-soft);
+}
+
+.as-sketch__node[data-hot="true"] .as-sketch__line {
+  stroke: var(--as-clay);
+  stroke-width: 1.8;
+}
+
+.as-sketch-raw {
+  font-size: 0.75rem;
+  white-space: pre-wrap;
+}

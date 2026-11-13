@@ -23,6 +23,7 @@ import {
 import {CommentComposer} from "@/components/comments/comment-composer";
 import {useCommentDraft} from "@/components/comments/comment-drafts";
 import {maximumCommentBodyCharacters} from "@/components/comments/comment-limits";
+import {CommentBody} from "@/components/comments/sketch";
 import {
   mergeThreads,
   threadWatermark,
@@ -866,7 +867,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                     : <DispatchStateChip state={sentDispatch.state} />}
                 </header>
                 <div className="as-comment-card__body">
-                  <p>{thread.body}</p>
+                  <CommentBody body={thread.body} />
                   <footer>
                     <div className="as-comment-card__meta">
                       <span>
@@ -1026,7 +1027,7 @@ function ReviewReply({
           }}
           submitLabel="Save reply"
         />
-      ) : <p>{reply.body}</p>}
+      ) : <CommentBody body={reply.body} />}
       {!canMutate || editing || (!ownReply && !canDeleteAny) ? null : (
         <div className="as-comment-reply__actions">
           {ownReply ? (
@@ -1049,9 +1050,9 @@ function ReviewReply({
 }
 
 /**
- * Claude-artifacts style: one thread opens in a small card floating beside
- * where it lives on the page, not in a side panel. Escape or clicking away
- * closes it.
+ * Claude-artifacts style: one thread opens in a small card floating by where
+ * it lives on the page, not in a side panel. Escape or clicking away closes it.
+ * Resolving is a keyboard-free click on the check; replying is the only field.
  */
 export function ThreadPopover({
   canComment,
@@ -1074,7 +1075,8 @@ export function ThreadPopover({
       if (event.key === "Escape") onClose();
     };
     const onDown = (event: PointerEvent): void => {
-      if (cardRef.current !== null && !cardRef.current.contains(event.target as Node)) onClose();
+      const target = event.target;
+      if (cardRef.current !== null && target instanceof Node && !cardRef.current.contains(target)) onClose();
     };
     window.addEventListener("keydown", onKey);
     window.addEventListener("pointerdown", onDown);
@@ -1091,7 +1093,6 @@ export function ThreadPopover({
     window.innerWidth - width - 12,
   );
   const top = Math.min(Math.max(12, (point?.y ?? 96) - 24), window.innerHeight - 320);
-  const working = session.agentWorking.get(thread.id);
   return (
     <aside
       aria-label={`Comment by ${thread.author.displayName}`}
@@ -1102,18 +1103,24 @@ export function ThreadPopover({
       <article className="as-comment-card" data-selected="true">
         <header data-initial={thread.author.displayName.slice(0, 1).toUpperCase()}>
           <strong>{thread.author.displayName}</strong>
-          <button
-            className="as-button"
-            disabled={!canComment}
-            onClick={() => void session.changeState(thread)}
-            title={thread.state === "open" ? "Resolve" : "Reopen"}
-            type="button"
-          >
-            {thread.state === "open" ? "✓ Resolve" : "Reopen"}
-          </button>
+          {canComment ? (
+            <button
+              aria-label={thread.state === "open" ? "Resolve" : "Reopen"}
+              className="as-thread-popover__resolve"
+              data-state={thread.state}
+              onClick={() => {
+                void session.changeState(thread);
+                if (thread.state === "open") onClose();
+              }}
+              title={thread.state === "open" ? "Resolve" : "Reopen"}
+              type="button"
+            >
+              ✓
+            </button>
+          ) : null}
         </header>
         <div className="as-comment-card__body">
-          <p>{thread.body}</p>
+          <CommentBody body={thread.body} />
         </div>
         {replies.length === 0 ? null : (
           <ol className="as-comment-replies">
@@ -1123,25 +1130,68 @@ export function ThreadPopover({
                   <strong>{reply.author.displayName}</strong>
                   <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
                 </header>
-                <p>{reply.body}</p>
+                <CommentBody body={reply.body} />
               </li>
             ))}
           </ol>
         )}
-        {working === undefined ? null : (
-          <p className="as-agent-working" role="status">{`${working} is working…`}</p>
-        )}
         {canComment && thread.state === "open" ? (
-          <ReplyComposer
-            artifactId={session.artifactId}
-            initiallyExpanded
-            key={thread.id}
-            principalId={principalId}
-            session={session}
-            thread={thread}
-          />
+          <InlineReply key={thread.id} session={session} thread={thread} principalId={principalId} />
         ) : null}
       </article>
     </aside>
+  );
+}
+
+/** One-line reply field: Return sends, Shift+Return breaks the line. No buttons. */
+function InlineReply({
+  principalId,
+  session,
+  thread,
+}: {
+  readonly principalId: string;
+  readonly session: ReviewCommentSession;
+  readonly thread: CommentThread;
+}) {
+  const draft = useCommentDraft({
+    artifactId: session.artifactId ?? "",
+    principalId,
+    threadId: thread.id,
+    versionId: null,
+  });
+  const [body, setBody] = useState(draft.initialBody);
+  const [pending, setPending] = useState(false);
+  const attemptKey = useRef<string | null>(null);
+  const send = async (): Promise<void> => {
+    const trimmed = body.trim();
+    if (trimmed === "" || pending || trimmed.length > maximumCommentBodyCharacters) return;
+    attemptKey.current ??= crypto.randomUUID();
+    setPending(true);
+    const saved = await session.createReply(thread, trimmed, attemptKey.current);
+    setPending(false);
+    if (!saved) return;
+    attemptKey.current = null;
+    setBody("");
+    draft.onPosted();
+  };
+  return (
+    <textarea
+      aria-label="Reply"
+      className="as-thread-popover__reply"
+      disabled={pending}
+      onChange={(event) => {
+        setBody(event.currentTarget.value);
+        draft.onBodyChange(event.currentTarget.value);
+      }}
+      onKeyDown={(event) => {
+        if (event.key === "Enter" && !event.shiftKey && !event.nativeEvent.isComposing) {
+          event.preventDefault();
+          void send();
+        }
+      }}
+      placeholder="Reply…"
+      rows={1}
+      value={body}
+    />
   );
 }
