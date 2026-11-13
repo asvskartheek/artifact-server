@@ -51,15 +51,26 @@ body {
   display: none !important;
 }
 
-[data-comment-popover] textarea {
-  min-height: 2.75rem !important;
-  background: transparent !important;
+/*
+ * The composer draws its text twice: an invisible <textarea> (caret, input)
+ * under a visible mirror <div> (highlighted @refs). Both must share exactly the
+ * same font, size, padding and line height, or the caret drifts off the text.
+ */
+[data-comment-popover] textarea,
+[data-comment-popover] [data-skill-ref-overlay] {
   border: 0 !important;
-  box-shadow: none !important;
-  font-family: "Anthropic Serif Text", Georgia, serif;
+  font-family: "Anthropic Serif Text", Georgia, serif !important;
   font-size: 0.95rem !important;
-  outline: none !important;
+  letter-spacing: normal !important;
+  line-height: 1.45 !important;
+  min-height: 2.75rem !important;
   padding: 0 !important;
+}
+
+[data-comment-popover] textarea {
+  background: transparent !important;
+  box-shadow: none !important;
+  outline: none !important;
 }
 
 [data-studio-send-to] {

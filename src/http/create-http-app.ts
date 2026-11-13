@@ -73,6 +73,7 @@ import {
   type ArtifactServerFailure,
   CapabilityUnavailable,
   ContentBootstrapRejected,
+  ContentSessionRequired,
   errorCodes,
   InvalidPagination,
   isArtifactServerFailure,
@@ -2433,13 +2434,24 @@ export function createHttpApp(
   });
 
   app.get("/artifacts/:artifactId", async (context) => {
-    const current = await runHttpApplicationEffect(
-      context,
-      dependencies,
-      ContentAccessService.use((contentAccess) =>
-        contentAccess.resolvePublicArtifact(context.req.param("artifactId"))
-      ),
-    );
+    const artifactId = context.req.param("artifactId");
+    let current;
+    try {
+      current = await runHttpApplicationEffect(
+        context,
+        dependencies,
+        ContentAccessService.use((contentAccess) =>
+          contentAccess.resolvePublicArtifact(artifactId)
+        ),
+      );
+    } catch (error) {
+      // A private artifact's link opens its review page (which signs the
+      // reader in) instead of a dead-end error; the review enforces access.
+      if (error instanceof ContentSessionRequired) {
+        return context.redirect(`/review?artifact=${encodeURIComponent(artifactId)}`, 302);
+      }
+      throw error;
+    }
     const versionUrl = versionBrowserUrl(
       responseApplicationUrl(context, dependencies),
       dependencies.contentDomain,
