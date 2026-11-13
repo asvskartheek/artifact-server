@@ -25,7 +25,7 @@
  */
 import {execFile} from "node:child_process";
 import {randomUUID} from "node:crypto";
-import {mkdir, mkdtemp, readFile, writeFile, copyFile} from "node:fs/promises";
+import {mkdir, mkdtemp, readFile, rm, writeFile, copyFile} from "node:fs/promises";
 import {tmpdir} from "node:os";
 import {basename, dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -135,6 +135,21 @@ function workerPrompt({body, entry, history, quoted, name}) {
   ].join("\n");
 }
 
+// Every live worker, so shutdown and timeouts never leave orphans behind.
+const workers = new Set();
+function killTree(child) {
+  if (child.exitCode !== null && child.pid === undefined) return;
+  try {
+    if (process.platform === "win32") {
+      execFile("taskkill", ["/pid", String(child.pid), "/T", "/F"], {windowsHide: true}, () => undefined);
+    } else {
+      process.kill(-child.pid, "SIGKILL");
+    }
+  } catch {
+    // already gone
+  }
+}
+
 // Bounded parallelism: at most `concurrency` worker processes at once.
 let running = 0;
 const waiting = [];
@@ -149,8 +164,21 @@ async function withSlot(task) {
   }
 }
 
-async function runWorker(thread, replies, base, name) {
-  const dir = await mkdtemp(join(tmpdir(), "studio-agent-"));
+/** Run `task` in a fresh temp folder that is always deleted afterwards. */
+async function inTempDir(prefix, task) {
+  const dir = await mkdtemp(join(tmpdir(), prefix));
+  try {
+    return await task(dir);
+  } finally {
+    await rm(dir, {force: true, recursive: true}).catch(() => undefined);
+  }
+}
+
+function runWorker(thread, replies, base, name) {
+  return inTempDir("studio-agent-", (dir) => runWorkerIn(dir, thread, replies, base, name));
+}
+
+async function runWorkerIn(dir, thread, replies, base, name) {
   const file = join(dir, basename(base.entry));
   await writeFile(file, base.html);
   const quoted = String(thread.anchor?.originalText ?? "") || null;
@@ -159,9 +187,21 @@ async function runWorker(thread, replies, base, name) {
   const launch = "Read ./TASK.md in the current directory and do exactly what it says.";
   const [command, ...args] = agentCommand.map((part) => part === "{prompt}" ? launch : part);
   const {stdout} = await withSlot(() => {
-    const pending = run(command, args, {cwd: dir, maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60 * 1000});
+    // Own process group (POSIX), so a timeout or shutdown kills the worker's
+    // whole tree, not just the top process.
+    const pending = run(command, args, {
+      cwd: dir,
+      detached: process.platform !== "win32",
+      killSignal: "SIGKILL",
+      maxBuffer: 16 * 1024 * 1024,
+      timeout: 10 * 60 * 1000,
+    });
     pending.child.stdin?.end(); // headless CLIs (pi -p) wait for stdin EOF otherwise
-    return pending;
+    workers.add(pending.child);
+    return pending.finally(() => {
+      killTree(pending.child);
+      workers.delete(pending.child);
+    });
   });
   // Everything after the last REPLY: line is the reply (text plus optional sketch).
   const at = stdout.lastIndexOf("REPLY:");
@@ -183,7 +223,12 @@ async function mergeAndPublish(projectId, artifactId, base, edited) {
   return withArtifactLock(artifactId, async () => {
     if (edited === base.html) return "unchanged";
     const latest = await currentEntry(projectId, artifactId);
-    const dir = await mkdtemp(join(tmpdir(), "studio-merge-"));
+    return inTempDir("studio-merge-", (dir) => mergeIn(dir, projectId, artifactId, base, edited, latest));
+  });
+}
+
+async function mergeIn(dir, projectId, artifactId, base, edited, latest) {
+  {
     const [ours, baseFile, theirs] = ["ours", "base", "theirs"].map((n) => join(dir, n));
     await Promise.all([writeFile(ours, latest.html), writeFile(baseFile, base.html), writeFile(theirs, edited)]);
     try {
@@ -204,7 +249,7 @@ async function mergeAndPublish(projectId, artifactId, base, edited) {
       "--project", projectId, "--artifact", artifactId, "--expected-version", latest.versionId,
     ], {cwd: repoRoot, maxBuffer: 8 * 1024 * 1024});
     return "published";
-  });
+  }
 }
 
 async function handleThread(projectId, threadId) {
@@ -270,8 +315,18 @@ async function adoptOrphans() {
     const page = await api(`/api/v1/agent-dispatches?projectId=${project.id}&state=delivered&limit=100`);
     for (const dispatch of page.items) {
       if (dispatch.agentDisplayName !== agentName || dispatch.agentId === agentId) continue;
-      log(`adopting ${dispatch.id} from a previous run`);
-      void handleDispatch(dispatch);
+      // Threads stay open after the agent replies, so "delivered" alone doesn't
+      // mean unfinished: adopt only threads whose last word isn't an agent reply.
+      const pending = [];
+      for (const threadId of dispatch.threadIds) {
+        const artifactId = await locateThread(project.id, threadId).catch(() => null);
+        if (artifactId === null) continue;
+        const {replies, thread} = await api(`/api/v1/artifacts/${artifactId}/comments/${threadId}?projectId=${project.id}`);
+        if (thread.state === "open" && replies.at(-1)?.author.principalKind !== "service") pending.push(threadId);
+      }
+      if (pending.length === 0) continue;
+      log(`adopting ${pending.length} unfinished thread(s) from ${dispatch.id}`);
+      void handleDispatch({...dispatch, threadIds: pending});
     }
   }
 }
@@ -282,6 +337,7 @@ setInterval(beacon, 20_000);
 // Leave presence at once on shutdown, so the review never routes to a dead agent.
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.once(signal, () => {
+    for (const child of workers) killTree(child);
     post(`/api/v1/agents/${agentId}/disconnect`, {}).finally(() => process.exit(0));
   });
 }

@@ -14,7 +14,7 @@
  * `node scripts/studio-setup.mjs stop` stops the background processes.
  */
 import {execFileSync, spawn} from "node:child_process";
-import {existsSync, mkdirSync, openSync, readFileSync, writeFileSync} from "node:fs";
+import {existsSync, mkdirSync, openSync, readFileSync, rmSync, writeFileSync} from "node:fs";
 import {homedir, platform} from "node:os";
 import {dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
@@ -68,6 +68,8 @@ function stop() {
     } catch {
       // already gone
     }
+    // A stale pid file would point at whatever process reuses that pid later.
+    rmSync(file, {force: true});
   }
 }
 
