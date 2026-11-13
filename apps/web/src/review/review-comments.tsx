@@ -58,6 +58,15 @@ const threadPageSize = 100;
  */
 const autoSendKey = "studio-auto-send";
 
+/**
+ * Agents reply with the server's shared local credential ("Local"), so show the
+ * agent's own name: the last agent this thread was sent to, else the connected one.
+ */
+export function replyAuthor(reply: CommentReply, agentNames: ReadonlyMap<string, string>): string {
+  if (reply.author.principalKind !== "service") return reply.author.displayName;
+  return agentNames.get(reply.threadId) ?? agentNames.get("") ?? reply.author.displayName;
+}
+
 function readAutoSend(): boolean {
   return window.localStorage.getItem(autoSendKey) !== "false";
 }
@@ -191,6 +200,8 @@ export interface ReviewCommentSession {
   /** Threads auto-sent in this tab that their agent has not answered yet, with that agent's name. */
   readonly agentWorking: ReadonlyMap<string, string>;
   readonly autoSend: boolean;
+  /** Agent display name per thread it was sent to; "" maps to the connected agent. */
+  readonly agentNames: ReadonlyMap<string, string>;
   /** Name of the agent a new comment goes to, or null when none is connected. */
   readonly autoSendAgent: string | null;
   readonly setAutoSend: (value: boolean) => void;
@@ -523,6 +534,7 @@ export function useReviewComments({
     artifactId,
     agentWorking,
     autoSend,
+    agentNames: new Map([["", autoSendAgent?.displayName ?? "Agent"], ...agentSent]),
     autoSendAgent: autoSendAgent?.displayName ?? null,
     changeState,
     createReply,
@@ -963,6 +975,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                     <ol className="as-comment-replies">
                       {replies.map((reply) => (
                         <ReviewReply
+                          agentNames={session.agentNames}
                           canDeleteAny={canDeleteAny}
                           canMutate={canComment}
                           key={reply.id}
@@ -999,6 +1012,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
 });
 
 function ReviewReply({
+  agentNames,
   canDeleteAny,
   canMutate,
   onDelete,
@@ -1006,6 +1020,7 @@ function ReviewReply({
   principalId,
   reply,
 }: {
+  readonly agentNames: ReadonlyMap<string, string>;
   readonly canDeleteAny: boolean;
   readonly canMutate: boolean;
   readonly onDelete: (reply: CommentReply) => Promise<void>;
@@ -1025,7 +1040,7 @@ function ReviewReply({
   return (
     <li data-agent={reply.author.principalKind === "service"}>
       <header>
-        <strong>{reply.author.displayName}</strong>
+        <strong>{replyAuthor(reply, agentNames)}</strong>
         <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
       </header>
       {editing ? (
@@ -1174,7 +1189,7 @@ export function ThreadPopover({
             {replies.map((reply) => (
               <li data-agent={reply.author.principalKind === "service"} key={reply.id}>
                 <header>
-                  <strong>{reply.author.displayName}</strong>
+                  <strong>{replyAuthor(reply, session.agentNames)}</strong>
                   <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
                 </header>
                 <CommentBody body={reply.body} />

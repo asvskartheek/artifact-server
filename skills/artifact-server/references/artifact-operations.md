@@ -2,6 +2,16 @@
 
 Use the CLI for local files and MCP for server-only work. Both enforce the same Artifact Server permissions. Invoke the installed `artifactserver` program normally. Inside the Artifact Server source checkout, use `pnpm artifactserver` when the installed program is unavailable.
 
+## Local studio (no sign-in)
+
+When `artifactserver auth status` lists no profiles, the server is the local studio on this machine. It needs no sign-in, profile, server flag, or API key: the CLI reaches it with its own local credential. Publish directly:
+
+```sh
+artifactserver publish "<path>" --name "<name>"
+```
+
+Never call `auth login` for the local studio, and never hand-build HTTP uploads.
+
 ## CLI publication
 
 Inspect the installed command when compatibility is uncertain:

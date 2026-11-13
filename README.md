@@ -1,5 +1,18 @@
 ![Artifact Server](./docs/assets/banner.webp)
 
+## Artifact Studio (this fork): one command, any OS
+
+```sh
+git clone https://github.com/asvskartheek/artifact-server.git && cd artifact-server
+node scripts/studio-setup.mjs        # Windows, macOS, Linux. Needs Node.js 24.12+
+```
+
+Installs what's missing (git, pnpm, GitHub Copilot CLI), starts the studio in the
+background, connects GitHub Copilot (CLI + VS Code chat), and starts an always-on
+agent that answers comments as **Copilot**, in parallel. Fully local, no API key.
+Then ask Copilot "make an artifact of …". Stop with `node scripts/studio-setup.mjs stop`.
+
+
 # Artifact Server
 
 **The open-source, self-hostable alternative to Claude Code artifacts.**

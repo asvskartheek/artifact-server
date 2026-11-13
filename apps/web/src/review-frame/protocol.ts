@@ -97,6 +97,12 @@ export const hostMessageSchema = z.discriminatedUnion("type", [
     v: versionSchema,
   }),
   z.object({
+    agentName: z.string().max(120).nullable(),
+    checked: z.boolean(),
+    type: z.literal("as-review-send-to"),
+    v: versionSchema,
+  }),
+  z.object({
     statuses: z.record(z.string(), z.enum(["working", "replied"])),
     type: z.literal("as-review-statuses"),
     v: versionSchema,
@@ -160,6 +166,11 @@ export const frameMessageSchema = z.discriminatedUnion("type", [
   }),
   z.object({
     type: z.literal("as-review-comment-mode-toggle"),
+    v: versionSchema,
+  }),
+  z.object({
+    checked: z.boolean(),
+    type: z.literal("as-review-send-to-change"),
     v: versionSchema,
   }),
 ]);

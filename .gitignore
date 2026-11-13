@@ -16,3 +16,4 @@ project/performance/results/
 deploy/pulumi/*/Pulumi.*.yaml
 !deploy/pulumi/*/Pulumi.*.example.yaml
 apps/web/public/fonts/anthropic-serif/
+.studio-logs/

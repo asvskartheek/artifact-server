@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+/* oxlint-disable no-await-in-loop -- the claim loop and listings are sequential by design */
 /**
  * Studio agent: an always-on, provider-agnostic agent that answers every
  * comment sent to it, all in parallel. Any headless coding-agent CLI works
@@ -13,26 +14,32 @@
  *   (`git merge-file`), published as one new version per merge, then the
  *   worker's reply is posted. The reviewer resolves the thread, not the agent.
  *
+ * Fully local: it uses the server's own local credential, no API key.
  * Env: ARTIFACT_SERVER_ORIGIN  default http://127.0.0.1:8787
- *      STUDIO_AGENT_TOKEN_FILE file with an API key (agent:connect, artifact:*, comment:write)
- *      STUDIO_AGENT_NAME       display name in the review, e.g. "Claude", "Codex" (default "Agent")
+ *      STUDIO_AGENT_NAME       display name in the review, e.g. "Copilot", "Claude" (default "Agent")
  *      STUDIO_AGENT_KIND       slug shown as metadata (default "studio")
- *      STUDIO_AGENT_CMD        JSON argv; "{prompt}" is replaced by the task text.
+ *      STUDIO_AGENT_CMD        JSON argv for the worker CLI. The task is written to TASK.md in the
+ *                              worker's folder; "{prompt}" becomes a fixed line telling it to read it.
  *                              default ["pi","-p","--no-session","--tools","read,edit,write","{prompt}"]
  *      STUDIO_AGENT_CONCURRENCY max parallel workers (default 8)
  */
 import {execFile} from "node:child_process";
 import {randomUUID} from "node:crypto";
 import {mkdir, mkdtemp, readFile, writeFile, copyFile} from "node:fs/promises";
-import {homedir, tmpdir} from "node:os";
+import {tmpdir} from "node:os";
 import {basename, dirname, join, resolve} from "node:path";
 import {fileURLToPath} from "node:url";
 import {promisify} from "node:util";
 
-const run = promisify(execFile);
+const execFileAsync = promisify(execFile);
+// Background only: never open a console window. Windows CLIs (copilot, pi) are
+// .cmd shims that need a shell; every argument we pass is a fixed string, never
+// comment text, so nothing untrusted reaches that shell.
+const run = (command, args, options = {}) =>
+  execFileAsync(command, args, {...options, shell: process.platform === "win32", windowsHide: true});
 const origin = process.env.ARTIFACT_SERVER_ORIGIN ?? "http://127.0.0.1:8787";
-const tokenFile = process.env.STUDIO_AGENT_TOKEN_FILE
-  ?? join(homedir(), ".artifact-studio", "agent-token");
+// The local server's own credential: no API key, nothing to configure.
+const tokenFile = join(dirname(fileURLToPath(import.meta.url)), "../../.artifact-server/local-api-token");
 const agentName = process.env.STUDIO_AGENT_NAME ?? "Agent";
 const agentKind = process.env.STUDIO_AGENT_KIND ?? "studio";
 const agentCommand = JSON.parse(process.env.STUDIO_AGENT_CMD
@@ -106,7 +113,8 @@ async function currentEntry(projectId, artifactId) {
 function workerPrompt({body, entry, history, quoted, name}) {
   return [
     `You are ${agentName}, editing the artifact "${name}" in response to one review comment.`,
-    `The artifact's file is ./${entry} in the current directory. Edit only that file, in place,`,
+    `The artifact's file is ./${entry} in the current directory. Edit only that file, in place`,
+    "(never edit TASK.md, never run shell commands),",
     "with minimal targeted edits (keep everything else byte-identical so parallel edits merge).",
     "If the comment is only a question, do not edit; just answer it.",
     quoted ? `The reviewer selected this text: "${quoted.slice(0, 400)}"` : "The comment is on the whole page.",
@@ -145,9 +153,11 @@ async function runWorker(thread, replies, base, name) {
   const dir = await mkdtemp(join(tmpdir(), "studio-agent-"));
   const file = join(dir, basename(base.entry));
   await writeFile(file, base.html);
-  const quoted = typeof thread.anchor?.originalText === "string" ? thread.anchor.originalText : null;
-  const prompt = workerPrompt({body: thread.body, entry: basename(base.entry), history: replies, name, quoted});
-  const [command, ...args] = agentCommand.map((part) => part === "{prompt}" ? prompt : part);
+  const quoted = String(thread.anchor?.originalText ?? "") || null;
+  // Untrusted comment text goes in a file, never on a command line.
+  await writeFile(join(dir, "TASK.md"), workerPrompt({body: thread.body, entry: basename(base.entry), history: replies, name, quoted}));
+  const launch = "Read ./TASK.md in the current directory and do exactly what it says.";
+  const [command, ...args] = agentCommand.map((part) => part === "{prompt}" ? launch : part);
   const {stdout} = await withSlot(() => {
     const pending = run(command, args, {cwd: dir, maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60 * 1000});
     pending.child.stdin?.end(); // headless CLIs (pi -p) wait for stdin EOF otherwise
@@ -178,14 +188,17 @@ async function mergeAndPublish(projectId, artifactId, base, edited) {
     await Promise.all([writeFile(ours, latest.html), writeFile(baseFile, base.html), writeFile(theirs, edited)]);
     try {
       await run("git", ["merge-file", ours, baseFile, theirs]);
-    } catch {
-      return null; // overlapping edits: caller retries on the newest version
+    } catch (error) {
+      if (error?.code !== "ENOENT") return null; // overlapping edits: caller retries on the newest version
+      // No git on this machine: take the worker's copy when nobody else changed the file.
+      if (latest.html !== base.html) return null;
+      await writeFile(ours, edited);
     }
     const out = join(dir, "publish");
     await mkdir(out);
     const target = join(out, basename(latest.entry));
     await copyFile(ours, target);
-    await run("node", [
+    await run(process.execPath, [
       "--import", "tsx", "src/cli/main.ts", "publish", target,
       "--server", origin, "--token-file", tokenFile,
       "--project", projectId, "--artifact", artifactId, "--expected-version", latest.versionId,

@@ -36,6 +36,8 @@ interface PreviewActions {
 /** Render one exact immutable manifest entry in the Artifact Server preview surface. */
 export function ReviewPreview({
   agentCursors,
+  sendTo,
+  onSendToChange,
   locateRequest,
   threadStatuses,
   annotateModeActive,
@@ -58,6 +60,8 @@ export function ReviewPreview({
   version,
 }: {
   readonly agentCursors: readonly AgentCursor[];
+  readonly sendTo: {readonly agentName: string | null; readonly checked: boolean};
+  readonly onSendToChange: (checked: boolean) => void;
   /** Ask the page where this thread lives; `n` re-asks for the same thread. */
   readonly locateRequest: {readonly n: number; readonly threadId: string} | null;
   /** Agent status per thread, painted on the page's comment bubbles. */
@@ -123,6 +127,8 @@ export function ReviewPreview({
       <HtmlPreview
         actions={commonActions}
         agentCursors={agentCursors}
+        sendTo={sendTo}
+        onSendToChange={onSendToChange}
         locateRequest={locateRequest}
         threadStatuses={threadStatuses}
         onCommentModeToggle={onCommentModeToggle}
@@ -212,6 +218,8 @@ export interface AgentCursor {
 function HtmlPreview({
   actions,
   agentCursors,
+  sendTo,
+  onSendToChange,
   locateRequest,
   threadStatuses,
   onCommentModeToggle,
@@ -232,6 +240,8 @@ function HtmlPreview({
 }: {
   readonly actions: PreviewActions;
   readonly agentCursors: readonly AgentCursor[];
+  readonly sendTo: {readonly agentName: string | null; readonly checked: boolean};
+  readonly onSendToChange: (checked: boolean) => void;
   readonly locateRequest: {readonly n: number; readonly threadId: string} | null;
   readonly threadStatuses: Readonly<Record<string, "replied" | "working">>;
   readonly onCommentModeToggle: () => void;
@@ -340,6 +350,10 @@ function HtmlPreview({
         onCommentModeToggle();
         return;
       }
+      if (message.type === "as-review-send-to-change") {
+        onSendToChange(message.checked);
+        return;
+      }
       void (async () => {
         const saved = await onSubmitAnnotation(message.body, message.anchor, entry.path);
         if (!saved) {
@@ -359,11 +373,17 @@ function HtmlPreview({
     onAnnotateModeChange,
     onCommentModeToggle,
     onPoint,
+    onSendToChange,
     onSelectAnnotation,
     onSubmitAnnotation,
     onUnanchoredChange,
     postToFrame,
   ]);
+
+  useEffect(() => {
+    if (!frameReady) return;
+    postToFrame({agentName: sendTo.agentName, checked: sendTo.checked, type: "as-review-send-to", v: reviewProtocolVersion});
+  }, [frameReady, postToFrame, previewDocument, sendTo.agentName, sendTo.checked]);
 
   useEffect(() => {
     if (!frameReady) return;

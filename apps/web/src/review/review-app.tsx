@@ -1960,6 +1960,8 @@ function ArtifactReview({
                 onOpenRawArtifact={() => void openRawArtifact()}
                 onAnnotateModeChange={setHtmlAnnotateModeActive}
                 agentCursors={agentCursors}
+                onSendToChange={comments.setAutoSend}
+                sendTo={{agentName: comments.autoSendAgent, checked: comments.autoSend}}
                 locateRequest={locateRequest}
                 threadStatuses={threadStatuses}
                 onCommentModeToggle={toggleCommentMode}

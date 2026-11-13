@@ -100,10 +100,51 @@ export function ReviewFrame(): React.ReactNode {
   const fontCssRef = useRef("");
   const cursorsRef = useRef<readonly unknown[]>([]);
   const statusesRef = useRef<Record<string, string>>({});
-
   const send = useCallback((message: FrameMessage): void => {
     window.parent.postMessage(message, window.location.origin);
   }, []);
+  const sendToRef = useRef<{agentName: string | null; checked: boolean}>({agentName: null, checked: true});
+  // Claude's "☑ Send to <agent>" in the in-page comment box, left of the send button.
+  const paintSendTo = useCallback((): void => {
+    const footer = document.querySelector("[data-comment-popover] .flex-row-reverse.border-t");
+    const {agentName, checked} = sendToRef.current;
+    let label = document.querySelector<HTMLLabelElement>("[data-studio-send-to]");
+    if (footer === null || agentName === null) {
+      label?.remove();
+      return;
+    }
+    if (label === null) {
+      label = document.createElement("label");
+      label.dataset["studioSendTo"] = "";
+      const box = document.createElement("input");
+      box.type = "checkbox";
+      box.addEventListener("change", () => {
+        send({checked: box.checked, type: "as-review-send-to-change", v: reviewProtocolVersion});
+      });
+      label.append(box, document.createElement("span"));
+      footer.append(label);
+    }
+    // Write only on change: these writes would otherwise re-trigger the observer forever.
+    const box = label.querySelector("input");
+    if (box !== null && box.checked !== checked) box.checked = checked;
+    const text = label.querySelector("span");
+    const wanted = `Send to ${agentName}`;
+    if (text !== null && text.textContent !== wanted) text.textContent = wanted;
+  }, [send]);
+  useEffect(() => {
+    // The composer mounts and unmounts inside the viewer; keep the checkbox on it.
+    let queued = 0;
+    const observer = new MutationObserver(() => {
+      if (queued !== 0) return;
+      queued = window.requestAnimationFrame(() => {
+        queued = 0;
+        paintSendTo();
+      });
+    });
+    observer.observe(document.body, {childList: true, subtree: true});
+    return () => observer.disconnect();
+  }, [paintSendTo]);
+
 
   useEffect(() => {
     // Framed by the application shell or nothing: a top-level review frame has
@@ -139,6 +180,11 @@ export function ReviewFrame(): React.ReactNode {
               isLight: message.isLight,
             }
         );
+        return;
+      }
+      if (message.type === "as-review-send-to") {
+        sendToRef.current = message;
+        paintSendTo();
         return;
       }
       if (message.type === "as-review-statuses") {
