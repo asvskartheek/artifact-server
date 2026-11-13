@@ -1,6 +1,6 @@
 import {describe, expect, it} from "vitest";
 
-import {parseSketch} from "../../apps/web/src/components/comments/sketch.tsx";
+import {parseSketch} from "../../apps/web/src/components/comments/sketch-parse.ts";
 
 describe("comment sketches", () => {
   it("reads boxes, pills, highlights and labelled arrows", () => {

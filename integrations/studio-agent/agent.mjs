@@ -103,7 +103,7 @@ async function currentEntry(projectId, artifactId) {
 }
 
 // ---------------------------------------------------------------- worker
-function workerPrompt({body, entry, quoted, name}) {
+function workerPrompt({body, entry, history, quoted, name}) {
   return [
     `You are ${agentName}, editing the artifact "${name}" in response to one review comment.`,
     `The artifact's file is ./${entry} in the current directory. Edit only that file, in place,`,
@@ -111,6 +111,10 @@ function workerPrompt({body, entry, quoted, name}) {
     "If the comment is only a question, do not edit; just answer it.",
     quoted ? `The reviewer selected this text: "${quoted.slice(0, 400)}"` : "The comment is on the whole page.",
     `Comment: ${body}`,
+    ...(history.length === 0 ? [] : [
+      "Conversation so far on this comment (oldest first); answer the LAST message:",
+      ...history.map((reply) => `- ${reply.author.principalKind === "service" ? "you" : reply.author.displayName}: ${reply.body.slice(0, 1500)}`),
+    ]),
     "",
     "Finish with your reply to the reviewer after a line containing only REPLY:",
     "Keep it to 1-2 sentences saying what you changed. When a picture says it faster (a before/after,",
@@ -137,12 +141,12 @@ async function withSlot(task) {
   }
 }
 
-async function runWorker(thread, base, name) {
+async function runWorker(thread, replies, base, name) {
   const dir = await mkdtemp(join(tmpdir(), "studio-agent-"));
   const file = join(dir, basename(base.entry));
   await writeFile(file, base.html);
   const quoted = typeof thread.anchor?.originalText === "string" ? thread.anchor.originalText : null;
-  const prompt = workerPrompt({body: thread.body, entry: basename(base.entry), name, quoted});
+  const prompt = workerPrompt({body: thread.body, entry: basename(base.entry), history: replies, name, quoted});
   const [command, ...args] = agentCommand.map((part) => part === "{prompt}" ? prompt : part);
   const {stdout} = await withSlot(() => {
     const pending = run(command, args, {cwd: dir, maxBuffer: 16 * 1024 * 1024, timeout: 10 * 60 * 1000});
@@ -199,7 +203,7 @@ async function handleThread(projectId, threadId) {
   for (let attempt = 1; attempt <= 2; attempt += 1) {
     const base = await currentEntry(projectId, artifactId);
     log(`thread ${threadId.slice(-6)} -> worker (attempt ${attempt})`);
-    const {edited, reply} = await runWorker(thread, base, base.name);
+    const {edited, reply} = await runWorker(thread, replies, base, base.name);
     const outcome = await mergeAndPublish(projectId, artifactId, base, edited);
     if (outcome === null) continue;
     await post(

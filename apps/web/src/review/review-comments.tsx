@@ -445,13 +445,26 @@ export function useReviewComments({
         body,
         idempotencyKey,
       ));
+      // Multi-turn: a reply on a thread an agent is in goes straight back to it.
+      const agentInThread = (repliesByThread.get(thread.id) ?? [])
+        .some((reply) => reply.author.principalKind === "service")
+        || agentSent.has(thread.id);
+      const target = pickAgent(agents, body, preferredAgentId);
+      if (target !== null && (agentInThread || autoSend)) {
+        try {
+          await sendThreadToAgent(target, projectId, thread.id);
+          setAgentSent((current) => new Map([...current, [thread.id, target.displayName]]));
+        } catch {
+          // The reply is saved; the hand-off can be redone from the list.
+        }
+      }
       await reload();
       return true;
     } catch (caught) {
       setError(caught instanceof Error ? caught : new Error("Reply creation failed."));
       return false;
     }
-  }, [artifactId, ownership, projectId, reload]);
+  }, [agentSent, agents, artifactId, autoSend, ownership, preferredAgentId, projectId, reload, repliesByThread]);
 
   const updateReply = useCallback(async (
     reply: CommentReply,
@@ -1073,22 +1086,36 @@ export function ThreadPopover({
   const thread = session.threads.find((candidate) => candidate.id === session.selectedThreadId);
   const cardRef = useRef<HTMLElement | null>(null);
   // Measured placement: the whole card always stays inside the window.
-  const [place, setPlace] = useState<{left: number; top: number} | null>(null);
+  const [place, setPlace] = useState<{left: number; maxHeight: number; top: number} | null>(null);
   const width = 300;
   const margin = 12;
   useLayoutEffect(() => {
     const card = cardRef.current;
     if (card === null) return;
-    const height = card.offsetHeight;
-    const anchorY = point?.y ?? 96;
-    // Google Docs: the card lives in the right margin, level with its text.
+    // Google Docs: the card lives in the right margin, level with its text,
+    // and never leaves the artifact pane (no covering the header).
     const pane = card.parentElement?.getBoundingClientRect();
-    const left = (pane?.right ?? window.innerWidth) - width - 20;
+    const paneTop = (pane?.top ?? 0) + margin;
+    const paneBottom = (pane?.bottom ?? window.innerHeight) - margin;
+    const maxHeight = paneBottom - paneTop;
+    const height = Math.min(card.scrollHeight, maxHeight);
+    const anchorY = point?.y ?? paneTop;
     setPlace({
-      left: Math.max(margin, left),
-      top: Math.min(Math.max(margin, anchorY - 24), Math.max(margin, window.innerHeight - height - margin)),
+      left: Math.max(margin, (pane?.right ?? window.innerWidth) - width - 20),
+      maxHeight,
+      top: Math.min(Math.max(paneTop, anchorY - 24), paneBottom - height),
     });
   }, [point, thread?.id, session.repliesByThread]);
+  // A new message scrolls into view: the conversation reads bottom-up like chat.
+  const replyCount = thread === undefined ? 0 : (session.repliesByThread.get(thread.id) ?? []).length;
+  useEffect(() => {
+    // After placement settles (max height applied, sketches laid out).
+    const frame = window.requestAnimationFrame(() => {
+      const card = cardRef.current;
+      if (card !== null) card.scrollTop = card.scrollHeight;
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [place, replyCount, thread?.id]);
   useEffect(() => {
     if (thread === undefined) return undefined;
     const onKey = (event: KeyboardEvent): void => {
@@ -1114,7 +1141,7 @@ export function ThreadPopover({
       ref={cardRef}
       style={{
         left: place?.left ?? margin,
-        maxHeight: `calc(100vh - ${margin * 2}px)`,
+        maxHeight: place?.maxHeight ?? `calc(100vh - ${margin * 2}px)`,
         top: place?.top ?? margin,
         visibility: place === null ? "hidden" : "visible",
         width,

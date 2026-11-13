@@ -2656,6 +2656,20 @@ export class PostgresArtifactRepository implements
           });
         }
         yield* this.#touchThread(command.threadId, command.createdAt);
+        // A person's follow-up reopens the conversation: release a spent
+        // marker so the next turn can be sent to an agent again.
+        if (command.author.principalKind === "human") {
+          yield* sql`UPDATE comment_threads SET dispatch_id = NULL
+            WHERE installation_id = ${installationId}
+              AND id = ${command.threadId}
+              AND project_id = ${command.projectId}
+              AND state = ${commentThreadStates.open}
+              AND dispatch_id IN (
+                SELECT id FROM agent_dispatches
+                WHERE installation_id = ${installationId}
+                  AND state IN ('delivered', 'addressed', 'failed', 'canceled')
+              )`;
+        }
         const replyAction = commentActionIdentity(command.threadId);
         yield* this.#insertAction(
           {

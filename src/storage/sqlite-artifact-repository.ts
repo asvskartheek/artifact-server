@@ -3542,6 +3542,11 @@ export class SqliteArtifactRepository implements
           });
         }
         this.#touchThread(command.threadId, command.createdAt);
+        // A person's follow-up reopens the conversation: release a spent
+        // marker so the next turn can be sent to an agent again.
+        if (command.author.principalKind === "human") {
+          this.#releaseSpentDispatchMarker(command.threadId);
+        }
         const replyAction = commentActionIdentity(command.threadId);
         this.#insertAction(
           command.projectId,

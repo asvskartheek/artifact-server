@@ -4299,6 +4299,7 @@ textarea {
 
 /* Docs-style margin card: quiet until hovered. */
 .as-thread-popover .as-comment-card {
+  overflow: visible;
   border-radius: 0.6rem;
   box-shadow: 0 1px 2px rgb(20 20 19 / 8%), 0 2px 8px rgb(20 20 19 / 6%);
 }
@@ -4442,7 +4443,11 @@ textarea {
   width: 0.9rem;
 }
 
+/* Reply line stays pinned at the card's bottom while the thread scrolls. */
 .as-thread-popover__reply {
+  bottom: 0.75rem;
+  box-shadow: 0 0.75rem 0 var(--card), 0 -0.6rem 0.8rem var(--card);
+  position: sticky;
   background: var(--secondary);
   border: 1px solid transparent;
   border-radius: 0.6rem;
@@ -4497,6 +4502,21 @@ textarea {
 .as-sketch__node[data-hot="true"] .as-sketch__line {
   stroke: var(--as-clay);
   stroke-width: 1.8;
+}
+
+.as-sketch .as-sketch__edge {
+  paint-order: stroke;
+  stroke: var(--card);
+  stroke-width: 3px;
+}
+
+.as-comment-card code,
+.as-comment-replies code {
+  background: var(--secondary);
+  border-radius: 0.25rem;
+  font-family: ui-monospace, "SF Mono", Menlo, monospace;
+  font-size: 0.82em;
+  padding: 0.05em 0.3em;
 }
 
 .as-sketch-raw {

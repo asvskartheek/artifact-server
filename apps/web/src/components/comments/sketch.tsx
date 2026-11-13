@@ -11,64 +11,9 @@
  * and the writer never authors SVG.
  */
 
-interface SketchNode {
-  readonly id: string;
-  label: string;
-  pill: boolean;
-  hot: boolean;
-}
+import {parseSketch, type Sketch, type SketchNode} from "./sketch-parse";
 
-interface SketchEdge {
-  readonly from: string;
-  readonly label: string;
-  readonly to: string;
-}
-
-export interface Sketch {
-  readonly edges: readonly SketchEdge[];
-  readonly nodes: readonly SketchNode[];
-}
-
-const nodePattern = /^\s*([\w-]+)\s*(?:\[([^\]]*)\]|\(([^)]*)\))?\s*(!)?\s*$/u;
-
-function readNode(text: string, nodes: Map<string, SketchNode>): string | null {
-  const match = nodePattern.exec(text);
-  if (match === null) return null;
-  const [, id = "", box, pill, hot] = match;
-  const node = nodes.get(id) ?? {hot: false, id, label: id, pill: false};
-  if (box !== undefined) node.label = box;
-  if (pill !== undefined) {
-    node.label = pill;
-    node.pill = true;
-  }
-  if (hot !== undefined) node.hot = true;
-  nodes.set(id, node);
-  return id;
-}
-
-/** Parse a sketch; unreadable lines are skipped, never fatal. */
-export function parseSketch(source: string): Sketch {
-  const nodes = new Map<string, SketchNode>();
-  const edges: SketchEdge[] = [];
-  for (const line of source.split("\n").slice(0, 60)) {
-    if (line.trim() === "") continue;
-    const arrow = line.indexOf("->");
-    if (arrow < 0) {
-      readNode(line, nodes);
-      continue;
-    }
-    const left = line.slice(0, arrow);
-    const rest = line.slice(arrow + 2);
-    const colon = rest.search(/:(?![^[(]*[\])])/u);
-    const right = colon < 0 ? rest : rest.slice(0, colon);
-    const from = readNode(left, nodes);
-    const to = readNode(right, nodes);
-    if (from !== null && to !== null) {
-      edges.push({from, label: colon < 0 ? "" : rest.slice(colon + 1).trim(), to});
-    }
-  }
-  return {edges, nodes: [...nodes.values()].slice(0, 24)};
-}
+export {parseSketch};
 
 /** Rank = longest path from a source, so arrows point down. Cycle-safe. */
 function ranks(sketch: Sketch): Map<string, number> {
@@ -111,9 +56,24 @@ function roughBox(x: number, y: number, w: number, h: number, pill: boolean, rnd
   return `M${x + j()},${y + j()} L${x + w + j()},${y + j()} L${x + w + j()},${y + h + j()} L${x + j()},${y + h + j()} Z`;
 }
 
-function fitLabel(label: string, width: number): string {
-  const max = Math.floor((width - 16) / 6.2);
-  return label.length > max ? `${label.slice(0, Math.max(1, max - 1))}…` : label;
+/** Up to two lines that fit the box, breaking on spaces; ellipsis only past that. */
+function fitLines(label: string, width: number): readonly string[] {
+  const max = Math.max(4, Math.floor((width - 14) / 5.6));
+  const lines: string[] = [];
+  let line = "";
+  for (const word of label.split(/\s+/u)) {
+    const next = line === "" ? word : `${line} ${word}`;
+    if (next.length <= max) {
+      line = next;
+    } else {
+      if (line !== "") lines.push(line);
+      line = word;
+    }
+  }
+  if (line !== "") lines.push(line);
+  if (lines.length <= 2) return lines.map((text) => text.length > max ? `${text.slice(0, max - 1)}…` : text);
+  const second = lines.slice(1).join(" ");
+  return [lines[0] ?? "", `${second.slice(0, max - 1)}…`];
 }
 
 export function SketchView({source}: {readonly source: string}) {
@@ -126,13 +86,13 @@ export function SketchView({source}: {readonly source: string}) {
     rows.set(row, [...(rows.get(row) ?? []), node]);
   }
   const width = 300;
-  const boxH = 30;
-  const rowGap = 34;
+  const boxH = 38;
+  const rowGap = 38;
   const place = new Map<string, {x: number; y: number; w: number}>();
   for (const [row, members] of rows) {
     // Share the row; a lone node may use the full width so its label fits.
     const room = (width - 8 - (members.length - 1) * 12) / members.length;
-    const widths = members.map((node) => Math.min(room, node.label.length * 6.2 + 22));
+    const widths = members.map((node) => Math.min(room, Math.max(60, Math.ceil(node.label.length / 2) * 6 + 22)));
     const total = widths.reduce((sum, w) => sum + w, 0) + (members.length - 1) * 12;
     let x = Math.max(4, (width - total) / 2);
     members.forEach((node, index) => {
@@ -176,7 +136,9 @@ export function SketchView({source}: {readonly source: string}) {
               strokeWidth="1.3"
             />
             {edge.label === "" ? null : (
-              <text className="as-sketch__edge" x={(x1 + x2) / 2 + 6} y={midY + 3}>{edge.label}</text>
+              <text className="as-sketch__edge" textAnchor="middle" x={(x1 + x2) / 2} y={midY + 3}>
+                {edge.label.length > 18 ? `${edge.label.slice(0, 17)}…` : edge.label}
+              </text>
             )}
           </g>
         );
@@ -189,12 +151,21 @@ export function SketchView({source}: {readonly source: string}) {
             <path className="as-sketch__fill" d={roughBox(at.x, at.y, at.w, boxH, node.pill, rnd)} />
             <path className="as-sketch__line" d={roughBox(at.x, at.y, at.w, boxH, node.pill, rnd)} fill="none" />
             <text textAnchor="middle" x={at.x + at.w / 2} y={at.y + boxH / 2 + 4}>
-              {fitLabel(node.label, at.w)}
+              {fitLines(node.label, at.w).map((text, index, all) => (
+                <tspan dy={index === 0 ? (all.length - 1) * -6.5 : 13} key={index} x={at.x + at.w / 2}>{text}</tspan>
+              ))}
             </text>
           </g>
         );
       })}
     </svg>
+  );
+}
+
+/** `code` spans render as code; everything else stays plain text (never HTML). */
+function withInlineCode(text: string): React.ReactNode[] {
+  return text.split(/`([^`\n]+)`/u).map((piece, index) =>
+    index % 2 === 1 ? <code key={index}>{piece}</code> : piece
   );
 }
 
@@ -206,7 +177,7 @@ export function CommentBody({body}: {readonly body: string}) {
       {parts.map((part, index) =>
         index % 2 === 1
           ? <SketchView key={index} source={part} />
-          : part.trim() === "" ? null : <p key={index}>{part.trim()}</p>
+          : part.trim() === "" ? null : <p key={index}>{withInlineCode(part.trim())}</p>
       )}
     </>
   );
