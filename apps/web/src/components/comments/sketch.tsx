@@ -146,10 +146,11 @@ export function SketchView({source}: {readonly source: string}) {
       {sketch.nodes.map((node) => {
         const at = place.get(node.id);
         if (at === undefined) return null;
+        // One outline for fill and stroke, or the two wobble apart into double boxes.
+        const outline = roughBox(at.x, at.y, at.w, boxH, node.pill, rnd);
         return (
           <g className="as-sketch__node" data-hot={node.hot} key={node.id}>
-            <path className="as-sketch__fill" d={roughBox(at.x, at.y, at.w, boxH, node.pill, rnd)} />
-            <path className="as-sketch__line" d={roughBox(at.x, at.y, at.w, boxH, node.pill, rnd)} fill="none" />
+            <path className="as-sketch__fill as-sketch__line" d={outline} />
             <text textAnchor="middle" x={at.x + at.w / 2} y={at.y + boxH / 2 + 4}>
               {fitLines(node.label, at.w).map((text, index, all) => (
                 <tspan dy={index === 0 ? (all.length - 1) * -6.5 : 13} key={index} x={at.x + at.w / 2}>{text}</tspan>
