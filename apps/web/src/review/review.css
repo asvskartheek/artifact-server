@@ -4291,6 +4291,9 @@ textarea {
 
 .as-thread-popover {
   animation: as-pop-in 120ms ease-out both;
+  background: var(--card);
+  border-radius: 0.6rem;
+  box-shadow: 0 0 0 1px var(--as-border), 0 1px 2px rgb(20 20 19 / 8%), 0 2px 8px rgb(20 20 19 / 6%);
   overflow-y: auto;
   overscroll-behavior: contain;
   position: fixed;
@@ -4298,14 +4301,12 @@ textarea {
 }
 
 /* Docs-style margin card: quiet until hovered. */
-.as-thread-popover .as-comment-card {
-  overflow: visible;
-  border-radius: 0.6rem;
-  box-shadow: 0 1px 2px rgb(20 20 19 / 8%), 0 2px 8px rgb(20 20 19 / 6%);
-}
-
+.as-thread-popover .as-comment-card,
 .as-thread-popover .as-comment-card[data-selected="true"] {
-  box-shadow: 0 0 0 1px var(--as-border), 0 1px 2px rgb(20 20 19 / 8%), 0 2px 8px rgb(20 20 19 / 6%);
+  background: transparent;
+  border-radius: 0;
+  box-shadow: none;
+  overflow: visible;
 }
 
 .as-thread-popover .as-comment-card > header {
@@ -4445,8 +4446,8 @@ textarea {
 
 /* Reply line stays pinned at the card's bottom while the thread scrolls. */
 .as-thread-popover__reply {
-  bottom: 0.75rem;
-  box-shadow: 0 0.75rem 0 var(--card), 0 -0.6rem 0.8rem var(--card);
+  bottom: 0;
+  box-shadow: 0 0.75rem 0 0 var(--card), 0 -0.75rem 0 0 var(--card);
   position: sticky;
   background: var(--secondary);
   border: 1px solid transparent;
