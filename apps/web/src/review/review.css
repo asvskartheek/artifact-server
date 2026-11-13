@@ -4291,8 +4291,8 @@ textarea {
 
 .as-thread-popover {
   animation: as-pop-in 120ms ease-out both;
-  max-height: min(28rem, calc(100vh - 2rem));
-  overflow: auto;
+  overflow-y: auto;
+  overscroll-behavior: contain;
   position: fixed;
   z-index: 60;
 }
@@ -4383,6 +4383,10 @@ textarea {
 
 /* Popover: one quiet check to resolve, one reply line. */
 .as-thread-popover__resolve {
+  align-items: center;
+  display: inline-flex;
+  justify-content: center;
+  padding: 0;
   background: none;
   border: 1px solid var(--as-border);
   border-radius: 999px;
@@ -4394,8 +4398,13 @@ textarea {
 }
 
 .as-thread-popover__resolve:hover {
-  border-color: #5a8a5e;
-  color: #5a8a5e;
+  border-color: var(--as-text);
+  color: var(--as-text);
+}
+
+.as-thread-popover__resolve svg {
+  height: 0.9rem;
+  width: 0.9rem;
 }
 
 .as-thread-popover__reply {

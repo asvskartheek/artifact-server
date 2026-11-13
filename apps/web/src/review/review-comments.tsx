@@ -1,9 +1,12 @@
+import {Archive02Icon, ArrowTurnBackwardIcon} from "@hugeicons/core-free-icons";
+import {HugeiconsIcon} from "@hugeicons/react";
 import {
   forwardRef,
   useCallback,
   useEffect,
   useId,
   useImperativeHandle,
+  useLayoutEffect,
   useMemo,
   useRef,
   useState,
@@ -1069,6 +1072,24 @@ export function ThreadPopover({
 }) {
   const thread = session.threads.find((candidate) => candidate.id === session.selectedThreadId);
   const cardRef = useRef<HTMLElement | null>(null);
+  // Measured placement: the whole card always stays inside the window.
+  const [place, setPlace] = useState<{left: number; top: number} | null>(null);
+  const width = 340;
+  const margin = 12;
+  useLayoutEffect(() => {
+    const card = cardRef.current;
+    if (card === null) return;
+    const height = card.offsetHeight;
+    const anchorX = point?.x ?? window.innerWidth - width - 24;
+    const anchorY = point?.y ?? 96;
+    // Right of the bubble when it fits, else left of it.
+    const right = anchorX + 16;
+    const left = right + width + margin <= window.innerWidth ? right : anchorX - width - 16;
+    setPlace({
+      left: Math.min(Math.max(margin, left), window.innerWidth - width - margin),
+      top: Math.min(Math.max(margin, anchorY - 24), Math.max(margin, window.innerHeight - height - margin)),
+    });
+  }, [point, thread?.id, session.repliesByThread]);
   useEffect(() => {
     if (thread === undefined) return undefined;
     const onKey = (event: KeyboardEvent): void => {
@@ -1087,35 +1108,35 @@ export function ThreadPopover({
   }, [onClose, thread]);
   if (thread === undefined || session.artifactId === null) return null;
   const replies = session.repliesByThread.get(thread.id) ?? [];
-  const width = 340;
-  const left = Math.min(
-    Math.max(12, (point?.x ?? window.innerWidth - width - 24) + 16),
-    window.innerWidth - width - 12,
-  );
-  const top = Math.min(Math.max(12, (point?.y ?? 96) - 24), window.innerHeight - 320);
   return (
     <aside
       aria-label={`Comment by ${thread.author.displayName}`}
       className="as-thread-popover"
       ref={cardRef}
-      style={{left, top, width}}
+      style={{
+        left: place?.left ?? margin,
+        maxHeight: `calc(100vh - ${margin * 2}px)`,
+        top: place?.top ?? margin,
+        visibility: place === null ? "hidden" : "visible",
+        width,
+      }}
     >
       <article className="as-comment-card" data-selected="true">
         <header data-initial={thread.author.displayName.slice(0, 1).toUpperCase()}>
           <strong>{thread.author.displayName}</strong>
           {canComment ? (
             <button
-              aria-label={thread.state === "open" ? "Resolve" : "Reopen"}
+              aria-label={thread.state === "open" ? "Archive" : "Restore"}
               className="as-thread-popover__resolve"
               data-state={thread.state}
               onClick={() => {
                 void session.changeState(thread);
                 if (thread.state === "open") onClose();
               }}
-              title={thread.state === "open" ? "Resolve" : "Reopen"}
+              title={thread.state === "open" ? "Archive (stays under Resolved)" : "Restore"}
               type="button"
             >
-              ✓
+              <HugeiconsIcon aria-hidden="true" icon={thread.state === "open" ? Archive02Icon : ArrowTurnBackwardIcon} strokeWidth={1.8} />
             </button>
           ) : null}
         </header>

@@ -1956,8 +1956,12 @@ function ArtifactReview({
                 onCommentModeToggle={() => setHtmlAnnotateModeActive((active) => !active)}
                 onPoint={setPopoverPoint}
                 onSelectAnnotation={(threadId) => {
+                  // Claude artifacts: a bubble opens its thread; the same bubble closes it.
+                  if (threadId !== null && popoverOpen && threadId === comments.selectedThreadId) {
+                    setPopoverOpen(false);
+                    return;
+                  }
                   comments.selectThread(threadId);
-                  // Claude artifacts: a thread opens in a popover by its marker.
                   setPopoverOpen(threadId !== null);
                 }}
                 onSubmitAnnotation={async (body, anchor, path) => {
