@@ -27,7 +27,6 @@ import {
   LayoutLeftIcon,
   Link01Icon,
   Moon02Icon,
-  PanelRightIcon,
   RefreshIcon,
   Search01Icon,
   Settings02Icon,
@@ -84,10 +83,10 @@ type ArtifactListLoadResult = "failed" | "loaded" | "skipped";
 type CatalogCommentFilter = "all" | "with" | "without";
 type CatalogRefreshState = "complete" | "idle" | "loading";
 type CatalogSort = "comments" | "newest";
-const catalogDefaultWidth = 336;
+const catalogDefaultWidth = 260;
 const catalogMinimumWidth = 240;
 const catalogMaximumWidth = 520;
-const inspectorDefaultWidth = 352;
+const inspectorDefaultWidth = 320;
 const inspectorMinimumWidth = 240;
 const inspectorMaximumWidth = 480;
 const inspectorGapPixels = 12;
@@ -556,8 +555,9 @@ function ArtifactReview({
   const [selectedVersion, setSelectedVersion] = useState<ArtifactVersion | null>(null);
   const [detailLoading, setDetailLoading] = useState(false);
   const [detailError, setDetailError] = useState<Error | null>(null);
-  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("details");
-  const [catalogOpen, setCatalogOpen] = useState(true);
+  const [inspectorTab, setInspectorTab] = useState<InspectorTab>("comments");
+  // Studio: the artifact gets the room; the list opens on demand ([).
+  const [catalogOpen, setCatalogOpen] = useState(false);
   const [inspectorOpen, setInspectorOpen] = useState(readInitialInspectorOpen);
   const [opening, setOpening] = useState(false);
   const [focusMode, setFocusMode] = useState(initialLocation.view === "focus");
@@ -828,6 +828,23 @@ function ArtifactReview({
     refreshLinkedDetails,
     session.capabilities.linkedArtifacts && details?.sourceBinding !== undefined,
   );
+
+  // Studio: like a Claude artifact, a reader on the current version
+  // follows each new publish in place (agent edits land live).
+  const followLatest = useCallback(async (): Promise<void> => {
+    if (selectedArtifactId === null || projectId === "" || details === null) return;
+    try {
+      const latest = await api.artifact(projectId, selectedArtifactId);
+      if (latest.current.version.id === details.current.version.id) return;
+      const onCurrent = selectedVersionId === details.current.version.id;
+      setDetails(latest);
+      setVersions(await api.versions(projectId, selectedArtifactId));
+      if (onCurrent) setSelectedVersionId(latest.current.version.id);
+    } catch {
+      // Ambient freshness never replaces the last readable artifact state.
+    }
+  }, [details, projectId, selectedArtifactId, selectedVersionId]);
+  useCommentPoll(followLatest, details !== null);
 
   const loadActions = useCallback(async (cursor: string | null): Promise<void> => {
     if (selectedArtifactId === null || projectId === "") return;
@@ -1776,9 +1793,7 @@ function ArtifactReview({
                 type="button"
               >
                 <HugeiconsIcon aria-hidden="true" icon={ExternalLinkIcon} strokeWidth={1.8} />
-                <span className="as-button__label">
-                  {opening ? "Opening…" : "Open raw artifact"}
-                </span>
+
               </button>
               <ReviewShareControl
                 details={details}
@@ -1805,14 +1820,21 @@ function ArtifactReview({
                 <span className="as-button__label">Full screen</span>
               </button>
               {!inspectorOpen ? (
-                <IconButton
-                  keyShortcuts="]"
-                  label="Open inspector"
-                  onClick={() => setInspectorOpen(true)}
-                  title="Open inspector (])"
+                <button
+                  aria-keyshortcuts="]"
+                  className="as-button as-button--secondary"
+                  onClick={() => {
+                    setInspectorTab("comments");
+                    setInspectorOpen(true);
+                  }}
+                  title="Comments (])"
+                  type="button"
                 >
-                  <HugeiconsIcon icon={PanelRightIcon} strokeWidth={1.8} />
-                </IconButton>
+                  <HugeiconsIcon aria-hidden="true" icon={Comment01Icon} strokeWidth={1.8} />
+                  <span className="as-button__label">
+                    {openCommentCount === 0 ? "Comment" : `${openCommentCount}`}
+                  </span>
+                </button>
               ) : null}
             </div>
           </header>
@@ -1959,10 +1981,24 @@ function ArtifactReview({
           <header className="as-pane-header as-inspector__header">
             <div aria-label="Artifact inspector" className="as-tabs" role="tablist">
               <InspectorTabButton active={inspectorTab === "comments"} count={openCommentCount} label="Comments" onClick={() => setInspectorTab("comments")} tab="comments" />
-              <InspectorTabButton active={inspectorTab === "details"} label="Details" onClick={() => setInspectorTab("details")} tab="details" />
-              <InspectorTabButton active={inspectorTab === "files"} count={selectedVersion?.manifest.entries.length ?? 0} label="Files" onClick={() => setInspectorTab("files")} tab="files" />
-              <InspectorTabButton active={inspectorTab === "versions"} count={versions.length} label="Versions" onClick={() => setInspectorTab("versions")} tab="versions" />
-              <InspectorTabButton active={inspectorTab === "activity"} label="Activity" onClick={() => setInspectorTab("activity")} tab="activity" />
+              {inspectorTab === "comments" ? (
+                <button
+                  aria-label="Artifact info"
+                  className="as-tab as-tab--more"
+                  onClick={() => setInspectorTab("versions")}
+                  title="Versions, files, details, activity"
+                  type="button"
+                >
+                  ⋯
+                </button>
+              ) : (
+                <>
+                  <InspectorTabButton active={inspectorTab === "versions"} count={versions.length} label="Versions" onClick={() => setInspectorTab("versions")} tab="versions" />
+                  <InspectorTabButton active={inspectorTab === "files"} count={selectedVersion?.manifest.entries.length ?? 0} label="Files" onClick={() => setInspectorTab("files")} tab="files" />
+                  <InspectorTabButton active={inspectorTab === "details"} label="Details" onClick={() => setInspectorTab("details")} tab="details" />
+                  <InspectorTabButton active={inspectorTab === "activity"} label="Activity" onClick={() => setInspectorTab("activity")} tab="activity" />
+                </>
+              )}
               {comparison === null ? null : (
                 <InspectorTabButton active={inspectorTab === "compare"} label="Compare" onClick={() => setInspectorTab("compare")} tab="compare" />
               )}
@@ -2742,13 +2778,14 @@ function ReviewGate({
 }
 
 function readInitialTheme(): ReviewTheme {
-  return window.localStorage.getItem("artifact-review-theme") === "dawn"
-    ? "dawn"
-    : "moon";
+  return window.localStorage.getItem("artifact-review-theme") === "moon"
+    ? "moon"
+    : "dawn";
 }
 
+// Studio: the comment rail opens on demand (or when a comment is made), never by default.
 function readInitialInspectorOpen(): boolean {
-  return window.matchMedia("(min-width: 1181px)").matches;
+  return false;
 }
 
 function readReviewLocation(): ReviewLocation {

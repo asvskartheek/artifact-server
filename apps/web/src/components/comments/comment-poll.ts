@@ -8,7 +8,8 @@ import type { CommentThread } from "@/api/client";
  * while the page is still open, long enough that a reading tab costs one
  * small request a minute.
  */
-export const commentPollIntervalMilliseconds = 7_000;
+// Claude Studio: fast enough that agent replies feel live on a local server.
+export const commentPollIntervalMilliseconds = 2_500;
 
 /**
  * The instant an incremental poll asks from: the newest change on screen.

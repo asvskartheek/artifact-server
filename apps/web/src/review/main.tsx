@@ -11,9 +11,10 @@ import "./review.css";
 // logout purge must not depend on which screen is mounted.
 installDraftGuard();
 
-const initialTheme = window.localStorage.getItem("artifact-review-theme") === "dawn"
-  ? "dawn"
-  : "moon";
+// Claude look: light (ivory) unless the reader picked dark.
+const initialTheme = window.localStorage.getItem("artifact-review-theme") === "moon"
+  ? "moon"
+  : "dawn";
 document.documentElement.dataset["reviewTheme"] = initialTheme;
 document.documentElement.classList.toggle("dark", initialTheme === "moon");
 

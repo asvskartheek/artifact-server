@@ -1,0 +1,33 @@
+/* Anthropic Serif, served locally from public/fonts (gitignored: proprietary, local use only). */
+@font-face {
+  font-display: swap;
+  font-family: "Anthropic Serif Display";
+  font-style: normal;
+  font-weight: 300;
+  src: url("/fonts/anthropic-serif/AnthropicSerif-Display-Light.otf") format("opentype");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Anthropic Serif Display";
+  font-style: normal;
+  font-weight: 400;
+  src: url("/fonts/anthropic-serif/AnthropicSerif-Display-Regular.otf") format("opentype");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Anthropic Serif Display";
+  font-style: normal;
+  font-weight: 500;
+  src: url("/fonts/anthropic-serif/AnthropicSerif-Display-Medium.otf") format("opentype");
+}
+
+@font-face {
+  font-display: swap;
+  font-family: "Anthropic Serif Text";
+  font-style: normal;
+  font-weight: 400;
+  src: url("/fonts/anthropic-serif/AnthropicSerif-Text-Regular.otf") format("opentype");
+}
+

@@ -12,6 +12,7 @@ import { Textarea } from "@/components/ui/textarea";
  * the text, so a retried create can never duplicate a comment.
  */
 export function CommentComposer({
+  agentToggle,
   cancelLabel,
   draftRestored = false,
   initialBody,
@@ -24,6 +25,12 @@ export function CommentComposer({
   onSubmit,
   submitLabel,
 }: {
+  /** Docs-style "Send to <agent>" checkbox shown before the submit button. */
+  readonly agentToggle?: undefined | {
+    readonly checked: boolean;
+    readonly label: string;
+    readonly onChange: (checked: boolean) => void;
+  };
   readonly cancelLabel: string | null;
   /** True when `initialBody` came out of the draft store, not the caller. */
   readonly draftRestored?: boolean;
@@ -94,7 +101,7 @@ export function CommentComposer({
           setBody(event.currentTarget.value);
           onBodyChange?.(event.currentTarget.value);
         }}
-        placeholder="Describe what should change and why."
+        placeholder="Add a comment, or @agent to ask for a change"
         value={body}
       />
       {tooLong
@@ -107,6 +114,16 @@ export function CommentComposer({
         )
         : null}
       <div className="as-comment-composer__actions flex flex-wrap gap-2">
+        {agentToggle === undefined ? null : (
+          <label className="as-comment-composer__agent">
+            <input
+              checked={agentToggle.checked}
+              onChange={(event) => agentToggle.onChange(event.currentTarget.checked)}
+              type="checkbox"
+            />
+            {agentToggle.label}
+          </label>
+        )}
         <Button
           disabled={pending || trimmed === "" || tooLong}
           onClick={() => void submit()}

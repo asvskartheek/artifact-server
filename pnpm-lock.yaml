@@ -193,6 +193,9 @@ importers:
       '@fontsource-variable/noto-sans':
         specifier: 5.3.0
         version: 5.3.0
+      '@fontsource-variable/source-serif-4':
+        specifier: 5.3.1
+        version: 5.3.1
       '@fontsource/atkinson-hyperlegible-mono':
         specifier: 5.3.0
         version: 5.3.0
@@ -1695,6 +1698,9 @@ packages:
 
   '@fontsource-variable/noto-sans@5.3.0':
     resolution: {integrity: sha512-e3ZuxzY9AL2psXPZlhwhnYrHUHv6PMoyK9MQ7croF0CUgURLqu9EMjW7q2FgVLwij1tjLsIHQrnwQ8aUcg4BiA==}
+
+  '@fontsource-variable/source-serif-4@5.3.1':
+    resolution: {integrity: sha512-4Rtay22SC4lMvw11r/+9kxANB6P3M0X8s1NudBC2v0J1KU2y3DcMoNcT3lBoZ/CqLirzf+StlO6UlJilyrvaUg==}
 
   '@fontsource/atkinson-hyperlegible-mono@5.3.0':
     resolution: {integrity: sha512-7Iha5azCRXJVk4NdxbVdKAE+4p/rMJoW6dslvhktugDFPSp7kxFRGAavBtwtSTrnyNhKXW8w1NHgMnrh/6OshA==}
@@ -9555,6 +9561,8 @@ snapshots:
   '@fontsource-variable/inter@5.3.0': {}
 
   '@fontsource-variable/noto-sans@5.3.0': {}
+
+  '@fontsource-variable/source-serif-4@5.3.1': {}
 
   '@fontsource/atkinson-hyperlegible-mono@5.3.0': {}
 

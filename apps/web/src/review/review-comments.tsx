@@ -46,6 +46,47 @@ import {
 } from "@/review-frame/protocol";
 
 const threadPageSize = 100;
+
+/**
+ * Auto-send: every new comment goes straight to an agent (Claude Docs'
+ * "Send to Claude", but for any connected agent of any kind or provider).
+ * One dispatch per comment, so a parallel-capable agent works them at once.
+ */
+const autoSendKey = "studio-auto-send";
+
+function readAutoSend(): boolean {
+  return window.localStorage.getItem(autoSendKey) !== "false";
+}
+
+/** The agent an `@name` mention names, else the default one; null when none is connected. */
+export function pickAgent(
+  agents: readonly AgentPresence[],
+  body: string,
+  preferredId: string | null,
+): AgentPresence | null {
+  const connected = agents
+    .filter((agent) => agent.connected)
+    .toSorted((left, right) => right.lastSeenAt.localeCompare(left.lastSeenAt));
+  const mentioned = connected.find((agent) =>
+    new RegExp(`(^|\\s)@${agent.displayName.replace(/[^\w-]/gu, "")}\\b`, "iu").test(body)
+  );
+  return mentioned
+    ?? connected.find((agent) => agent.id === preferredId)
+    ?? connected[0]
+    ?? null;
+}
+
+async function sendThreadToAgent(
+  agent: AgentPresence,
+  projectId: string,
+  threadId: string,
+): Promise<void> {
+  await api.createAgentDispatch(
+    projectId,
+    {agentId: agent.id, note: null, threadIds: [threadId]},
+    crypto.randomUUID(),
+  );
+}
 const conversationLoadConcurrency = 6;
 
 function agentPresenceSummary(agents: readonly AgentPresence[] | null): string {
@@ -59,10 +100,10 @@ function agentPresenceSummary(agents: readonly AgentPresence[] | null): string {
 }
 
 function threadQuery(
-  versionId: string,
+  _versionId: string,
   since: string | null,
   cursor: string | null,
-  dispatched: "exclude" | "include" | "only" | null = null,
+  dispatched: "exclude" | "include" | "only" | null = "include",
 ): CommentThreadQuery {
   return {
     cursor,
@@ -70,7 +111,9 @@ function threadQuery(
     limit: threadPageSize,
     since,
     state: null,
-    versionId,
+    // Studio: a thread lives on the artifact, not one version, so it
+    // stays in view while an agent publishes the versions that address it.
+    versionId: null,
   };
 }
 
@@ -79,7 +122,7 @@ async function loadAllThreads(
   artifactId: string,
   versionId: string,
   since: string | null,
-  dispatched: "exclude" | "include" | "only" | null = null,
+  dispatched: "exclude" | "include" | "only" | null = "include",
   cursor: string | null = null,
   collected: readonly CommentThread[] = [],
 ): Promise<readonly CommentThread[]> {
@@ -141,6 +184,12 @@ export interface ReviewCommentSession {
   readonly artifactId: string | null;
   readonly annotations: readonly ReviewAnnotation[];
   readonly changeState: (thread: CommentThread) => Promise<void>;
+  /** Threads auto-sent in this tab that their agent has not answered yet, with that agent's name. */
+  readonly agentWorking: ReadonlyMap<string, string>;
+  readonly autoSend: boolean;
+  /** Name of the agent a new comment goes to, or null when none is connected. */
+  readonly autoSendAgent: string | null;
+  readonly setAutoSend: (value: boolean) => void;
   readonly createReply: (
     thread: CommentThread,
     body: string,
@@ -186,6 +235,26 @@ export function useReviewComments({
   const [unanchoredIds, setUnanchoredIds] = useState<readonly string[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<Error | null>(null);
+  const [autoSend, setAutoSendState] = useState(readAutoSend);
+  const [agentSent, setAgentSent] = useState<ReadonlyMap<string, string>>(new Map());
+  const [agents, setAgents] = useState<readonly AgentPresence[]>([]);
+  const setAutoSend = useCallback((value: boolean): void => {
+    window.localStorage.setItem(autoSendKey, String(value));
+    setAutoSendState(value);
+  }, []);
+  const loadAgents = useCallback(async (): Promise<void> => {
+    try {
+      setAgents(await api.agentPresence());
+    } catch {
+      // Presence is advisory; the last list stays.
+    }
+  }, []);
+  useEffect(() => {
+    void loadAgents();
+  }, [loadAgents]);
+  useCommentPoll(loadAgents, projectId !== "");
+  const [preferredAgentId, setPreferredAgentId] = useState<string | null>(null);
+  const autoSendAgent = pickAgent(agents, "", preferredAgentId);
   const watermarkRef = useRef<string | null>(null);
   const reloadGenerationRef = useRef(0);
   const threadUpdatedAtRef = useRef<ReadonlyMap<string, string>>(new Map());
@@ -313,6 +382,18 @@ export function useReviewComments({
           crypto.randomUUID(),
         )
       );
+      const target = pickAgent(agents, body, preferredAgentId);
+      const mentioned = target !== null
+        && new RegExp(`@${target.displayName.replace(/[^\w-]/gu, "")}\\b`, "iu").test(body);
+      if (target !== null && (autoSend || mentioned)) {
+        try {
+          await sendThreadToAgent(target, projectId, created.thread.id);
+          setPreferredAgentId(target.id);
+          setAgentSent((current) => new Map([...current, [created.thread.id, target.displayName]]));
+        } catch {
+          // The comment is saved; a failed hand-off leaves it for a manual send.
+        }
+      }
       if (created.thread.versionId !== versionId) {
         onVersionChanged(created.thread.versionId);
       } else {
@@ -326,7 +407,7 @@ export function useReviewComments({
       );
       return false;
     }
-  }, [artifactId, onVersionChanged, ownership, projectId, reload, versionId]);
+  }, [agents, artifactId, autoSend, onVersionChanged, ownership, preferredAgentId, projectId, reload, versionId]);
 
   const changeState = useCallback(async (thread: CommentThread): Promise<void> => {
     if (artifactId === null || projectId === "") return;
@@ -406,6 +487,14 @@ export function useReviewComments({
     }
   }, [artifactId, ownership, projectId, reload]);
 
+  const agentWorking = useMemo(() => new Map([...agentSent].filter(([id, name]) => {
+    const thread = threads.find((candidate) => candidate.id === id);
+    if (thread === undefined || thread.state !== "open") return false;
+    return !(repliesByThread.get(id) ?? []).some((reply) =>
+      reply.author.displayName === name
+    );
+  })), [agentSent, repliesByThread, threads]);
+
   const annotations = useMemo(
     () => threads.filter((thread) => thread.state === "open").map(toAnnotation),
     [threads],
@@ -414,6 +503,9 @@ export function useReviewComments({
   return {
     annotations,
     artifactId,
+    agentWorking,
+    autoSend,
+    autoSendAgent: autoSendAgent?.displayName ?? null,
     changeState,
     createReply,
     deleteReply,
@@ -424,6 +516,7 @@ export function useReviewComments({
     repliesByThread,
     selectedThreadId,
     selectThread: setSelectedThreadId,
+    setAutoSend,
     submit,
     threads,
     unanchoredIds,
@@ -453,6 +546,11 @@ function NewThreadComposer({
   return (
     <div data-new-thread-composer>
       <CommentComposer
+        agentToggle={session.autoSendAgent === null ? undefined : {
+          checked: session.autoSend,
+          label: `Send to ${session.autoSendAgent}`,
+          onChange: session.setAutoSend,
+        }}
         cancelLabel={null}
         draftRestored={draft.restored}
         initialBody={draft.initialBody}
@@ -565,7 +663,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
   const unanchored = new Set(session.unanchoredIds);
   const [agents, setAgents] = useState<readonly AgentPresence[] | null>(null);
   const [agentError, setAgentError] = useState<Error | null>(null);
-  const [view, setView] = useState<CommentView>("open");
+  const [view, setView] = useState<CommentView>("all");
   const [sentThreads, setSentThreads] = useState<readonly CommentThread[]>([]);
   const [sentReplies, setSentReplies] = useState<ReadonlyMap<
     string,
@@ -758,7 +856,7 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                 className="as-comment-card"
                 data-selected={session.selectedThreadId === thread.id}
               >
-                <header>
+                <header data-initial={thread.author.displayName.slice(0, 1).toUpperCase()}>
                   <strong>{thread.author.displayName}</strong>
                   {sentDispatch === undefined
                     ? <span data-state={thread.state}>{thread.state}</span>
@@ -857,6 +955,11 @@ export const ReviewCommentsInspector = forwardRef<ReviewCommentsInspectorHandle,
                     </ol>
                   </section>
                 )}
+                {session.agentWorking.has(thread.id) ? (
+                  <p className="as-agent-working" role="status">
+                    {`${session.agentWorking.get(thread.id) ?? "Agent"} is working…`}
+                  </p>
+                ) : null}
                 {view !== "sent" && canComment && thread.state === "open"
                     && session.artifactId !== null ? (
                   <ReplyComposer
@@ -900,7 +1003,7 @@ function ReviewReply({
     setDeleting(false);
   };
   return (
-    <li>
+    <li data-agent={reply.author.principalKind === "service"}>
       <header>
         <strong>{reply.author.displayName}</strong>
         <time dateTime={reply.updatedAt}>{formatTimestamp(reply.updatedAt)}</time>
