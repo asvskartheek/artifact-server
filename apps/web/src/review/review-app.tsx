@@ -569,6 +569,14 @@ function ArtifactReview({
   const [htmlAnnotateModeActive, setHtmlAnnotateModeActive] = useState(false);
   const [popoverPoint, setPopoverPoint] = useState<{readonly x: number; readonly y: number} | null>(null);
   const [popoverOpen, setPopoverOpen] = useState(false);
+  // One key press may reach several frames' listeners; toggle once per press.
+  const lastCommentToggle = useRef(0);
+  const toggleCommentMode = useCallback((): void => {
+    const now = performance.now();
+    if (now - lastCommentToggle.current < 150) return;
+    lastCommentToggle.current = now;
+    setHtmlAnnotateModeActive((active) => !active);
+  }, []);
   const [homeOpen, setHomeOpen] = useState(false);
   const focusCommentsButtonRef = useRef<HTMLButtonElement>(null);
   const focusControlsRestoreRef = useRef<HTMLButtonElement>(null);
@@ -1268,7 +1276,7 @@ function ArtifactReview({
 
       if (key === "c" && !event.metaKey && !event.ctrlKey && !event.altKey) {
         event.preventDefault();
-        setHtmlAnnotateModeActive((active) => !active);
+        toggleCommentMode();
         return;
       }
 
@@ -1954,7 +1962,7 @@ function ArtifactReview({
                 agentCursors={agentCursors}
                 locateRequest={locateRequest}
                 threadStatuses={threadStatuses}
-                onCommentModeToggle={() => setHtmlAnnotateModeActive((active) => !active)}
+                onCommentModeToggle={toggleCommentMode}
                 onPoint={setPopoverPoint}
                 onSelectAnnotation={(threadId) => {
                   // Claude artifacts: a bubble opens its thread; the same bubble closes it.

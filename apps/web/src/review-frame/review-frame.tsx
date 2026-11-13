@@ -193,6 +193,17 @@ export function ReviewFrame(): React.ReactNode {
       }
     };
     window.addEventListener("message", onSandbox);
+    // C toggles comment mode when focus sits in this middle frame too
+    // (after clicking the page or closing a comment box), not only in the shell.
+    const onKey = (event: KeyboardEvent): void => {
+      if (event.key.toLowerCase() !== "c" || event.metaKey || event.ctrlKey || event.altKey) return;
+      const target = event.target;
+      if (target instanceof HTMLElement
+        && (target.isContentEditable || /^(input|textarea|select)$/iu.test(target.tagName))) return;
+      event.preventDefault();
+      send({type: "as-review-comment-mode-toggle", v: reviewProtocolVersion});
+    };
+    window.addEventListener("keydown", onKey);
     if (framed) {
       window.addEventListener("message", onMessage);
       send({type: "as-review-ready", v: reviewProtocolVersion});
@@ -200,6 +211,7 @@ export function ReviewFrame(): React.ReactNode {
     return () => {
       window.removeEventListener("message", onMessage);
       window.removeEventListener("message", onSandbox);
+      window.removeEventListener("keydown", onKey);
     };
   }, [send]);
 
